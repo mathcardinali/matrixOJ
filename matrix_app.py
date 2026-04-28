@@ -243,7 +243,7 @@ def save_data(df, token):
 # ==========================================
 @st.cache_data(ttl=1800) 
 def fetch_automotive_news():
-feeds = [
+    feeds = [
     # --- Os 8 Principais (Anteriormente citados) ---
     "https://motor1.uol.com.br/rss/news/all/",
     "https://insideevs.uol.com.br/rss/news/all/",
