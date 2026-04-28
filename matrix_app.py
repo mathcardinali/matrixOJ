@@ -527,7 +527,7 @@ if not df.empty:
                         df.at[idx, 'Lenght'] = el
                         df.at[idx, 'Width'] = ew
                         df.at[idx, 'Height'] = eh
-                        df.at[idx, 'Launch Date'] = ed
+                        df.at[idx, 'Launch Date'] = pd.to_datetime(ed) # <-- CORREÇÃO APLICADA
                         df.at[idx, 'Type of info'] = es
                         
                         if save_data(df, token_atual):
