@@ -474,7 +474,7 @@ if not df.empty:
                     nd = st.date_input(t("launch_window"))
                     ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
-                if st.form_submit_button(t("save")):
+if st.form_submit_button(t("save")):
                     # Validação de Campos Obrigatórios
                     if not nb or not nn or not nt or not npt or np <= 0:
                         st.warning(t("mandatory_warning"))
@@ -485,9 +485,13 @@ if not df.empty:
                             'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
                         }
                         if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
-                            # Limpeza de variáveis de sessão e feedback visual
+                            # Limpeza de variáveis do Fast Register
                             if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
                             if 'fast_title' in st.session_state: del st.session_state['fast_title']
+                            
+                            # --- A MÁGICA ACONTECE AQUI ---
+                            # Desliga o Radar para que ele não recarregue no próximo boot
+                            st.session_state['show_news'] = False 
                             
                             st.success(t("success_added").format(name=nn))
                             time.sleep(2) # Pausa breve para o usuário ler o sucesso antes de recarregar
