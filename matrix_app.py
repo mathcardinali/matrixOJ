@@ -67,7 +67,9 @@ translations = {
         "add_new_vehicle": "➕ Add New Vehicle",
         "mandatory_warning": "⚠️ Please fill all mandatory fields: Brand, Name (Model), Category, Powertrain, and a valid Price.",
         "success_added": "✅ Vehicle {name} added successfully!",
-        "others": "Others"
+        "others": "Others",
+        "delete_btn": "🗑️ Delete Vehicle",
+        "success_deleted": "✅ Vehicle {name} deleted successfully!"
     },
     "ZH": {
         "login_title": "🔒 登录 - 市场情报",
@@ -115,7 +117,9 @@ translations = {
         "add_new_vehicle": "➕ 添加新车辆",
         "mandatory_warning": "⚠️ 请填写所有必填字段：品牌，名称，类别，动力系统和有效价格。",
         "success_added": "✅ 车辆 {name} 成功添加！",
-        "others": "其他"
+        "others": "其他",
+        "delete_btn": "🗑️ 删除车辆",
+        "success_deleted": "✅ 车辆 {name} 已成功删除！"
     }
 }
 
@@ -347,10 +351,10 @@ if not df.empty:
     # ==================== ABA 1: MATRIZ ====================
     with tab1:
         c1, c2 = st.columns(2)
-        y_axis_label = 'Month_Year' if view_mode == t("month") else 'Quarter'
         
-        e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Width', 'Height', 'Price', 'Launch Date'], index=4) 
-        e_y = c2.selectbox(t("y_axis"), [y_axis_label, 'Price', 'Lenght', 'Width', 'Height'], index=1)
+        # Ajuste de Filtros (Eixos X e Y)
+        e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Price', 'Launch Date'], index=2) 
+        e_y = c2.selectbox(t("y_axis"), ['Price', 'Lenght'], index=0)
 
         # Legenda agrupada por Categoria ('Type')
         fig = px.scatter(df_f, x=e_x, y=e_y, 
@@ -468,8 +472,7 @@ if not df.empty:
                     np = st.number_input(t("price") + " *", min_value=0.0, step=1000.0)
                     nl = st.number_input(t("length"), min_value=0, step=1)
                 with col_f3:
-                    nw = st.number_input(t("width"), min_value=0, step=1)
-                    nh = st.number_input(t("height"), min_value=0, step=1)
+                    # Ajuste no Cadastro de Veículos: Remoção dos inputs de width e height
                     nd = st.date_input(t("launch_window"))
                     ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
@@ -480,7 +483,7 @@ if not df.empty:
                     else:
                         new_data = {
                             'Brand': nb, 'Name': nn, 'Type': nt, 'Powertrain': npt, 
-                            'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 
+                            'Price': np, 'Lenght': nl, 
                             'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
                         }
                         if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
@@ -523,7 +526,14 @@ if not df.empty:
                     stss = ["Official", "Speculation"]
                     es = st.selectbox(t("status"), stss, index=stss.index(row_edit['Type of info']) if row_edit['Type of info'] in stss else 0)
 
-                if st.form_submit_button(t("save")):
+                # Nova Função em Editar Veículos: Botões Salvar e Deletar
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    btn_save = st.form_submit_button(t("save"))
+                with col_btn2:
+                    btn_delete = st.form_submit_button(t("delete_btn"))
+
+                if btn_save:
                     # Revalidação para a edição
                     if not eb or not en or not et or not ept or ep <= 0:
                         st.warning(t("mandatory_warning"))
@@ -536,10 +546,18 @@ if not df.empty:
                         df.at[idx, 'Lenght'] = el
                         df.at[idx, 'Width'] = ew
                         df.at[idx, 'Height'] = eh
-                        df.at[idx, 'Launch Date'] = pd.to_datetime(ed) # <-- Correção do KeyError aplicada
+                        df.at[idx, 'Launch Date'] = pd.to_datetime(ed)
                         df.at[idx, 'Type of info'] = es
                         
                         if save_data(df, token_atual):
                             st.success(t("success_added").format(name=en))
                             time.sleep(1.5)
                             st.rerun()
+
+                if btn_delete:
+                    # Lógica de remoção
+                    df = df.drop(index=idx)
+                    if save_data(df, token_atual):
+                        st.success(t("success_deleted").format(name=en))
+                        time.sleep(1.5)
+                        st.rerun()
