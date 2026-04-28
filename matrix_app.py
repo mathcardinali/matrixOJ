@@ -408,41 +408,48 @@ if not df.empty:
 
         st.plotly_chart(fig, use_container_width=True)
 
-    # ==================== ABA 2: NEWS RADAR & CADASTRO IN-PAGE ====================
+# ==================== ABA 2: NEWS RADAR & CADASTRO IN-PAGE ====================
     with tab2:
         st.subheader(t("tab_radar"))
         st.markdown(f"*{t('news_desc')}*")
+        
+        # --- BOTÃO SOB DEMANDA (Evita o carregamento automático) ---
+        if st.button("📰 Buscar Notícias (On-Demand)", use_container_width=True):
+            st.session_state['show_news'] = True
         
         # Filtro de Timeframe
         col_dates = st.columns(2)
         start_news = col_dates[0].date_input("Start Date", date.today().replace(day=1))
         end_news = col_dates[1].date_input("End Date", date.today())
         
-        with st.spinner(t("loading_news")):
-            df_news = fetch_automotive_news()
-            
-            if not df_news.empty:
-                df_news = df_news[(df_news['Date'] >= start_news) & (df_news['Date'] <= end_news)]
+        # Só executa o RSS se o botão foi clicado (estado salvo na sessão)
+        if st.session_state.get('show_news', False):
+            with st.spinner(t("loading_news")):
+                df_news = fetch_automotive_news()
                 
                 if not df_news.empty:
-                    brands_found = sorted(df_news['Brand'].unique())
-                    tabs_news = st.tabs(brands_found)
-                    for i, b in enumerate(brands_found):
-                        with tabs_news[i]:
-                            news_b = df_news[df_news['Brand'] == b]
-                            for idx, row in news_b.iterrows():
-                                n_col1, n_col2 = st.columns([4, 1])
-                                n_col1.markdown(f"**[{row['Title']}]({row['Link']})** - *{row['DateStr']}*")
-                                
-                                # Fast Register Action
-                                if n_col2.button(t("fast_register"), key=f"btn_news_{idx}"):
-                                    st.session_state['fast_brand'] = row['Brand'] if row['Brand'] != t("others") else brand_list[0]
-                                    st.session_state['fast_title'] = row['Title'][:40] 
-                                    st.toast(t("sent_to_add"))
+                    # Filtra pelas datas selecionadas
+                    df_news = df_news[(df_news['Date'] >= start_news) & (df_news['Date'] <= end_news)]
+                    
+                    if not df_news.empty:
+                        brands_found = sorted(df_news['Brand'].unique())
+                        tabs_news = st.tabs(brands_found)
+                        for i, b in enumerate(brands_found):
+                            with tabs_news[i]:
+                                news_b = df_news[df_news['Brand'] == b]
+                                for idx, row in news_b.iterrows():
+                                    n_col1, n_col2 = st.columns([4, 1])
+                                    n_col1.markdown(f"**[{row['Title']}]({row['Link']})** - *{row['DateStr']}*")
+                                    
+                                    # Fast Register Action
+                                    if n_col2.button(t("fast_register"), key=f"btn_news_{idx}"):
+                                        st.session_state['fast_brand'] = row['Brand'] if row['Brand'] != t("others") else brand_list[0]
+                                        st.session_state['fast_title'] = row['Title'][:40] 
+                                        st.toast(t("sent_to_add"))
+                    else:
+                        st.info(t("no_news"))
                 else:
                     st.info(t("no_news"))
-            else:
-                st.info(t("no_news"))
 
         st.markdown("---")
         
@@ -451,40 +458,7 @@ if not df.empty:
         default_name_add = st.session_state.get('fast_title', '')
 
         with st.expander(t("add_new_vehicle"), expanded=bool(default_name_add)):
-            with st.form("quick_add_form", clear_on_submit=True):
-                col_f1, col_f2, col_f3 = st.columns(3)
-                with col_f1:
-                    nb = st.selectbox(t("brand") + " *", brand_list, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
-                    nn = st.text_input(t("name") + " *", value=default_name_add)
-                    nt = st.selectbox(t("category") + " *", type_list)
-                with col_f2:
-                    npt = st.selectbox(t("powertrain") + " *", ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
-                    np = st.number_input(t("price") + " *", min_value=0.0, step=1000.0)
-                    nl = st.number_input(t("length"), min_value=0, step=1)
-                with col_f3:
-                    nw = st.number_input(t("width"), min_value=0, step=1)
-                    nh = st.number_input(t("height"), min_value=0, step=1)
-                    nd = st.date_input(t("launch_window"))
-                    ns = st.selectbox(t("status"), ["Official", "Speculation"])
-
-                if st.form_submit_button(t("save")):
-                    # Validação de Campos Obrigatórios
-                    if not nb or not nn or not nt or not npt or np <= 0:
-                        st.warning(t("mandatory_warning"))
-                    else:
-                        new_data = {
-                            'Brand': nb, 'Name': nn, 'Type': nt, 'Powertrain': npt, 
-                            'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 
-                            'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
-                        }
-                        if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
-                            # Limpeza de variáveis de sessão e feedback visual
-                            if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
-                            if 'fast_title' in st.session_state: del st.session_state['fast_title']
-                            
-                            st.success(t("success_added").format(name=nn))
-                            time.sleep(2) # Pausa breve para o usuário ler o sucesso antes de recarregar
-                            st.rerun()
+            with st.form("
 
     # ==================== ABA 3: EDIÇÃO (CRUD) ====================
     with tab3:
