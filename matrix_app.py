@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import date, datetime
 from time import mktime
+import time
 import msal
 import requests
 from io import BytesIO
@@ -18,7 +19,7 @@ st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layo
 
 CACHE_FILE = "token_cache.bin"
 
-# Dicionário de Internacionalização (i18n)
+# Dicionário de Internacionalização (i18n) - Atualizado para Fase 4
 translations = {
     "EN": {
         "login_title": "🔒 Login - Market Intelligence",
@@ -43,8 +44,7 @@ translations = {
         "category": "Category (Type)",
         "price": "Price Range (R$)",
         "tab_matrix": "📊 Competitive Matrix",
-        "tab_radar": "📰 News Radar",
-        "tab_add": "➕ Add Vehicle",
+        "tab_radar": "📰 News Radar & Fast Add",
         "tab_edit": "✏️ Edit Vehicle",
         "x_axis": "X Axis",
         "y_axis": "Y Axis",
@@ -56,11 +56,15 @@ translations = {
         "status": "Status",
         "save": "Save & Sync",
         "select_edit": "Select Vehicle to Edit",
-        "news_desc": "Latest launch news. Filter by date and click 'Fast Register' to send to the Add tab.",
+        "news_desc": "Latest launch news. Filter by date and click 'Fast Register' to auto-fill the form below.",
         "loading_news": "Scanning news portals...",
         "no_news": "No recent launch news found for the selected period.",
         "fast_register": "⚡ Fast Register",
-        "sent_to_add": "Data sent! Go to the 'Add Vehicle' tab to complete the registration."
+        "sent_to_add": "Data sent! Scroll down to complete the registration.",
+        "add_new_vehicle": "➕ Add New Vehicle",
+        "mandatory_warning": "⚠️ Please fill all mandatory fields: Brand, Name (Model), Category, Powertrain, and a valid Price.",
+        "success_added": "✅ Vehicle {name} added successfully!",
+        "others": "Others"
     },
     "ZH": {
         "login_title": "🔒 登录 - 市场情报",
@@ -85,8 +89,7 @@ translations = {
         "category": "类别 (Type)",
         "price": "价格范围 (R$)",
         "tab_matrix": "📊 竞争矩阵",
-        "tab_radar": "📰 新闻雷达",
-        "tab_add": "➕ 添加车辆",
+        "tab_radar": "📰 新闻雷达与快速添加",
         "tab_edit": "✏️ 编辑车辆",
         "x_axis": "X 轴",
         "y_axis": "Y 轴",
@@ -98,15 +101,19 @@ translations = {
         "status": "状态",
         "save": "保存并同步",
         "select_edit": "选择要编辑的车辆",
-        "news_desc": "最新发布新闻。按日期筛选并点击“快速注册”发送到添加选项卡。",
+        "news_desc": "最新发布新闻。按日期筛选并点击“快速注册”自动填充下方表单。",
         "loading_news": "扫描新闻门户...",
         "no_news": "在所选期间未找到最近的发布新闻。",
         "fast_register": "⚡ 快速注册",
-        "sent_to_add": "数据已发送！转到“添加车辆”选项卡完成注册。"
+        "sent_to_add": "数据已发送！向下滚动完成注册。",
+        "add_new_vehicle": "➕ 添加新车辆",
+        "mandatory_warning": "⚠️ 请填写所有必填字段：品牌，名称，类别，动力系统和有效价格。",
+        "success_added": "✅ 车辆 {name} 成功添加！",
+        "others": "其他"
     }
 }
 
-# Requisito: Toggle Switch de Idioma
+# Toggle Switch de Idioma
 is_chinese = st.sidebar.toggle("🌐 中文 / English", value=False)
 st.session_state.lang = "ZH" if is_chinese else "EN"
 
@@ -208,7 +215,7 @@ def load_data(token):
             df['Month_Year'] = df['Launch Date'].dt.strftime('%m/%Y')
             df['Quarter'] = df['Launch Date'].dt.to_period('Q').astype(str)
             df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
-            df['Type'] = df['Type'].fillna('Outros').astype(str)
+            df['Type'] = df['Type'].fillna(t('others')).astype(str)
             df['Type of info'] = df['Type of info'].fillna('Speculation').astype(str)
             return df
         except Exception as e:
@@ -227,15 +234,12 @@ def save_data(df, token):
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
     resp = requests.put(url, headers=headers, data=output.getvalue())
     if resp.status_code in [200, 201]:
-        st.success(t("sync_success"))
         st.cache_data.clear()
         return True
-    else:
-        st.error(t("sync_error"))
-        return False
+    return False
 
 # ==========================================
-# 4. FUNÇÃO DE RADAR RSS (Com Timeframe Filter)
+# 4. FUNÇÃO DE RADAR RSS (Com "Others")
 # ==========================================
 @st.cache_data(ttl=1800) 
 def fetch_automotive_news():
@@ -253,13 +257,12 @@ def fetch_automotive_news():
             for entry in parsed.entries:
                 title = entry.title
                 if any(kw.lower() in title.lower() for kw in keywords):
-                    matched_brand = "General"
+                    matched_brand = t("others")
                     for b in brands:
                         if b in title.upper():
                             matched_brand = b if b != 'VW' else 'VOLKSWAGEN'
                             break
                     
-                    # Extração segura de data do RSS
                     pub_date = date.today()
                     if hasattr(entry, 'published_parsed') and entry.published_parsed:
                         pub_date = datetime.fromtimestamp(mktime(entry.published_parsed)).date()
@@ -298,10 +301,11 @@ if not df.empty:
         brand_list = sorted(df['Brand'].unique())
         type_list = sorted(df['Type'].unique())
         
+        # Garante exposição explícita das marcas no filtro
         m_sel = st.multiselect(t("brand"), brand_list, default=brand_list)
         t_sel = st.multiselect(t("category"), type_list, default=type_list)
         
-        # Requisito: Filtro de Preços Fixo (Default 85k - 400k)
+        # Filtro de Preços Fixo (Default: 85.000 a 400.000)
         min_p_data, max_p_data = float(df['Price'].min()), float(df['Price'].max())
         slider_min = min(85000.0, min_p_data)
         slider_max = max(400000.0, max_p_data)
@@ -314,7 +318,8 @@ if not df.empty:
 
     st.title(t("app_title"))
     
-    tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_add"), t("tab_edit")])
+    # Abas consolidadas: Cadastro migrou para dentro do Radar
+    tab1, tab2, tab3 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit")])
 
     # ==================== ABA 1: MATRIZ ====================
     with tab1:
@@ -324,7 +329,7 @@ if not df.empty:
         e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Width', 'Height', 'Price', 'Launch Date'], index=4) 
         e_y = c2.selectbox(t("y_axis"), [y_axis_label, 'Price', 'Lenght', 'Width', 'Height'], index=1)
 
-        # Requisito: Legenda agrupada por Categoria ('Type')
+        # Legenda agrupada por Categoria ('Type')
         fig = px.scatter(df_f, x=e_x, y=e_y, 
                          color='Type', 
                          text='Label', 
@@ -365,7 +370,7 @@ if not df.empty:
             textfont=dict(size=9, color="white", family="Arial Black") 
         )
         
-        # Requisito: Respiro de 800px no layout, sem restrições nos eixos, responsividade ligada
+        # Respiro de 800px no layout, responsividade ligada
         fig.update_layout(
             height=800,
             template="plotly_white", 
@@ -374,18 +379,17 @@ if not df.empty:
             uniformtext_mode='hide',
             legend_title_text=t("category")
         )
-        # Removendo quaisquer amarras de width/height herdadas nos eixos
         fig.update_xaxes(autorange=True)
         fig.update_yaxes(autorange=True)
 
         st.plotly_chart(fig, use_container_width=True)
 
-    # ==================== ABA 2: NEWS RADAR ====================
+    # ==================== ABA 2: NEWS RADAR & CADASTRO IN-PAGE ====================
     with tab2:
         st.subheader(t("tab_radar"))
         st.markdown(f"*{t('news_desc')}*")
         
-        # Requisito: Filtro de Timeframe no Radar
+        # Filtro de Timeframe
         col_dates = st.columns(2)
         start_news = col_dates[0].date_input("Start Date", date.today().replace(day=1))
         end_news = col_dates[1].date_input("End Date", date.today())
@@ -394,7 +398,6 @@ if not df.empty:
             df_news = fetch_automotive_news()
             
             if not df_news.empty:
-                # Filtrando pela janela de data
                 df_news = df_news[(df_news['Date'] >= start_news) & (df_news['Date'] <= end_news)]
                 
                 if not df_news.empty:
@@ -407,51 +410,60 @@ if not df.empty:
                                 n_col1, n_col2 = st.columns([4, 1])
                                 n_col1.markdown(f"**[{row['Title']}]({row['Link']})** - *{row['DateStr']}*")
                                 
-                                # Requisito: Fluxo Rápido de Cadastro via Radar
+                                # Fast Register Action
                                 if n_col2.button(t("fast_register"), key=f"btn_news_{idx}"):
-                                    st.session_state['fast_brand'] = row['Brand']
-                                    st.session_state['fast_title'] = row['Title'][:40] # Simplificando o nome pro form
-                                    st.success(t("sent_to_add"))
+                                    st.session_state['fast_brand'] = row['Brand'] if row['Brand'] != t("others") else brand_list[0]
+                                    st.session_state['fast_title'] = row['Title'][:40] 
+                                    st.toast(t("sent_to_add"))
                 else:
                     st.info(t("no_news"))
             else:
                 st.info(t("no_news"))
 
-    # ==================== ABA 3: CADASTRO ====================
-    with tab3:
-        st.subheader(t("tab_add"))
+        st.markdown("---")
         
-        # Puxa informações do Fast Register do Radar (se existirem)
+        # --- Formulário de Cadastro Embutido (In-Page) ---
         default_brand_add = st.session_state.get('fast_brand', brand_list[0])
         default_name_add = st.session_state.get('fast_title', '')
-        
-        with st.form("new_car", clear_on_submit=True):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                # Requisito: Dropdowns no cadastro
-                nb = st.selectbox(t("brand"), brand_list, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
-                nn = st.text_input(t("name"), value=default_name_add)
-                nt = st.selectbox(t("category"), type_list)
-            with col2:
-                npt = st.selectbox(t("powertrain"), ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
-                np = st.number_input(t("price"), min_value=0.0, step=1000.0)
-                nl = st.number_input(t("length"), min_value=0, step=1)
-            with col3:
-                nw = st.number_input(t("width"), min_value=0, step=1)
-                nh = st.number_input(t("height"), min_value=0, step=1)
-                nd = st.date_input(t("launch_window"))
-                ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
-            if st.form_submit_button(t("save")):
-                new_data = {'Brand': nb, 'Name': nn, 'Type': nt, 'Powertrain': npt, 'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns}
-                if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
-                    # Limpa o state do fast register após salvar com sucesso
-                    if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
-                    if 'fast_title' in st.session_state: del st.session_state['fast_title']
-                    st.rerun()
+        with st.expander(t("add_new_vehicle"), expanded=bool(default_name_add)):
+            with st.form("quick_add_form", clear_on_submit=True):
+                col_f1, col_f2, col_f3 = st.columns(3)
+                with col_f1:
+                    nb = st.selectbox(t("brand") + " *", brand_list, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
+                    nn = st.text_input(t("name") + " *", value=default_name_add)
+                    nt = st.selectbox(t("category") + " *", type_list)
+                with col_f2:
+                    npt = st.selectbox(t("powertrain") + " *", ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
+                    np = st.number_input(t("price") + " *", min_value=0.0, step=1000.0)
+                    nl = st.number_input(t("length"), min_value=0, step=1)
+                with col_f3:
+                    nw = st.number_input(t("width"), min_value=0, step=1)
+                    nh = st.number_input(t("height"), min_value=0, step=1)
+                    nd = st.date_input(t("launch_window"))
+                    ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
-    # ==================== ABA 4: EDIÇÃO (CRUD) ====================
-    with tab4:
+                if st.form_submit_button(t("save")):
+                    # Validação de Campos Obrigatórios
+                    if not nb or not nn or not nt or not npt or np <= 0:
+                        st.warning(t("mandatory_warning"))
+                    else:
+                        new_data = {
+                            'Brand': nb, 'Name': nn, 'Type': nt, 'Powertrain': npt, 
+                            'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 
+                            'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
+                        }
+                        if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
+                            # Limpeza de variáveis de sessão e feedback visual
+                            if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
+                            if 'fast_title' in st.session_state: del st.session_state['fast_title']
+                            
+                            st.success(t("success_added").format(name=nn))
+                            time.sleep(2) # Pausa breve para o usuário ler o sucesso antes de recarregar
+                            st.rerun()
+
+    # ==================== ABA 3: EDIÇÃO (CRUD) ====================
+    with tab3:
         st.subheader(t("tab_edit"))
         df_edit_options = df['Brand'] + " " + df['Name']
         veh_sel = st.selectbox(t("select_edit"), df_edit_options.tolist())
@@ -463,13 +475,13 @@ if not df.empty:
             with st.form("edit_car"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    eb = st.selectbox(t("brand"), brand_list, index=brand_list.index(row_edit['Brand']) if row_edit['Brand'] in brand_list else 0)
-                    en = st.text_input(t("name"), value=row_edit['Name'])
-                    et = st.selectbox(t("category"), type_list, index=type_list.index(row_edit['Type']) if row_edit['Type'] in type_list else 0)
+                    eb = st.selectbox(t("brand") + " *", brand_list, index=brand_list.index(row_edit['Brand']) if row_edit['Brand'] in brand_list else 0)
+                    en = st.text_input(t("name") + " *", value=row_edit['Name'])
+                    et = st.selectbox(t("category") + " *", type_list, index=type_list.index(row_edit['Type']) if row_edit['Type'] in type_list else 0)
                 with col2:
                     pts = ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"]
-                    ept = st.selectbox(t("powertrain"), pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
-                    ep = st.number_input(t("price"), min_value=0.0, step=1000.0, value=float(row_edit['Price']))
+                    ept = st.selectbox(t("powertrain") + " *", pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
+                    ep = st.number_input(t("price") + " *", min_value=0.0, step=1000.0, value=float(row_edit['Price']))
                     el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
                 with col3:
                     ew = st.number_input(t("width"), min_value=0, step=1, value=int(row_edit['Width']) if pd.notnull(row_edit['Width']) else 0)
@@ -479,16 +491,22 @@ if not df.empty:
                     es = st.selectbox(t("status"), stss, index=stss.index(row_edit['Type of info']) if row_edit['Type of info'] in stss else 0)
 
                 if st.form_submit_button(t("save")):
-                    df.at[idx, 'Brand'] = eb
-                    df.at[idx, 'Name'] = en
-                    df.at[idx, 'Type'] = et
-                    df.at[idx, 'Powertrain'] = ept
-                    df.at[idx, 'Price'] = ep
-                    df.at[idx, 'Lenght'] = el
-                    df.at[idx, 'Width'] = ew
-                    df.at[idx, 'Height'] = eh
-                    df.at[idx, 'Launch Date'] = ed
-                    df.at[idx, 'Type of info'] = es
-                    
-                    if save_data(df, token_atual):
-                        st.rerun()
+                    # Revalidação para a edição
+                    if not eb or not en or not et or not ept or ep <= 0:
+                        st.warning(t("mandatory_warning"))
+                    else:
+                        df.at[idx, 'Brand'] = eb
+                        df.at[idx, 'Name'] = en
+                        df.at[idx, 'Type'] = et
+                        df.at[idx, 'Powertrain'] = ept
+                        df.at[idx, 'Price'] = ep
+                        df.at[idx, 'Lenght'] = el
+                        df.at[idx, 'Width'] = ew
+                        df.at[idx, 'Height'] = eh
+                        df.at[idx, 'Launch Date'] = ed
+                        df.at[idx, 'Type of info'] = es
+                        
+                        if save_data(df, token_atual):
+                            st.success(t("success_added").format(name=en))
+                            time.sleep(1.5)
+                            st.rerun()
