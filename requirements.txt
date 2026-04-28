@@ -1,5 +1,7 @@
-msal
+streamlit
 pandas
 plotly
+msal
 requests
 openpyxl
+feedparser
