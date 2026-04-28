@@ -243,10 +243,34 @@ def save_data(df, token):
 # ==========================================
 @st.cache_data(ttl=1800) 
 def fetch_automotive_news():
-    feeds = [
-        "https://motor1.uol.com.br/rss/news/all/",
-        "https://insideevs.uol.com.br/rss/news/all/"
-    ]
+feeds = [
+    # --- Os 8 Principais (Anteriormente citados) ---
+    "https://motor1.uol.com.br/rss/news/all/",
+    "https://insideevs.uol.com.br/rss/news/all/",
+    "https://www.automotivebusiness.com.br/rss/",
+    "https://autoesporte.globo.com/rss/autoesporte/",
+    "https://quatrorodas.abril.com.br/feed/",
+    "https://www.mobiauto.com.br/revista/rss",
+    "https://www.noticiasautomotivas.com.br/feed/",
+    "https://garagem360.com.br/feed/",
+    
+    # --- Inteligência de Mercado e Segredos (Novos) ---
+    "https://www.autossegredos.com.br/feed/",
+    "https://autoentusiastas.com.br/feed/",
+    "https://www.autoo.com.br/noticias/rss.xml",
+    "https://vrum.com.br/feed/",
+    "https://car.blog.br/feeds/posts/default",
+    
+    # --- Negócios e Economia ---
+    "https://valor.globo.com/rss/brasil/setor-automotivo/",
+    "https://exame.com/noticias-sobre/setor-automotivo/feed/",
+    "https://forbes.com.br/forbes-motors/feed/",
+    
+    # --- Grande Mídia e Marketplaces ---
+    "https://jornaldocarro.estadao.com.br/feed/",
+    "https://www.webmotors.com.br/wm1/rss",
+    "https://www.icarros.com.br/noticias/rss"
+]
     keywords = ['lançamento', 'novo', 'chega', 'flagra', 'híbrido', 'elétrico', 'rumores', 'segredo', 'projeção', 'facelift', 'reestilização', 'pré-venda', 'preços', 'SUV', 'PHEV', 'BEV', 'nacionalização', 'confirma']
     brands = ['OMODA','JAECOO','GEELY','GAC','BYD', 'GWM', 'CHERY', 'VOLKSWAGEN', 'VW', 'TOYOTA', 'FIAT', 'OMODA', 'JAECOO', 'RENAULT']
     
