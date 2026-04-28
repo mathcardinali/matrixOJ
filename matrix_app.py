@@ -458,7 +458,40 @@ if not df.empty:
         default_name_add = st.session_state.get('fast_title', '')
 
         with st.expander(t("add_new_vehicle"), expanded=bool(default_name_add)):
-            with st.form("
+            with st.form("quick_add_form", clear_on_submit=True):
+                col_f1, col_f2, col_f3 = st.columns(3)
+                with col_f1:
+                    nb = st.selectbox(t("brand") + " *", brand_list, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
+                    nn = st.text_input(t("name") + " *", value=default_name_add)
+                    nt = st.selectbox(t("category") + " *", type_list)
+                with col_f2:
+                    npt = st.selectbox(t("powertrain") + " *", ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
+                    np = st.number_input(t("price") + " *", min_value=0.0, step=1000.0)
+                    nl = st.number_input(t("length"), min_value=0, step=1)
+                with col_f3:
+                    nw = st.number_input(t("width"), min_value=0, step=1)
+                    nh = st.number_input(t("height"), min_value=0, step=1)
+                    nd = st.date_input(t("launch_window"))
+                    ns = st.selectbox(t("status"), ["Official", "Speculation"])
+
+                if st.form_submit_button(t("save")):
+                    # Validação de Campos Obrigatórios
+                    if not nb or not nn or not nt or not npt or np <= 0:
+                        st.warning(t("mandatory_warning"))
+                    else:
+                        new_data = {
+                            'Brand': nb, 'Name': nn, 'Type': nt, 'Powertrain': npt, 
+                            'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 
+                            'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
+                        }
+                        if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
+                            # Limpeza de variáveis de sessão e feedback visual
+                            if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
+                            if 'fast_title' in st.session_state: del st.session_state['fast_title']
+                            
+                            st.success(t("success_added").format(name=nn))
+                            time.sleep(2) # Pausa breve para o usuário ler o sucesso antes de recarregar
+                            st.rerun()
 
     # ==================== ABA 3: EDIÇÃO (CRUD) ====================
     with tab3:
