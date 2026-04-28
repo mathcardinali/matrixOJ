@@ -332,11 +332,11 @@ if not df.empty:
         m_sel = st.multiselect(t("brand"), brand_list, default=brand_list)
         t_sel = st.multiselect(t("category"), type_list, default=type_list)
         
-        # Filtro de Preços Fixo (Default: 85.000 a 400.000)
-        min_p_data, max_p_data = float(df['Price'].min()), float(df['Price'].max())
-        slider_min = min(85000.0, min_p_data)
-        slider_max = max(400000.0, max_p_data)
-        p_sel = st.slider(t("price"), slider_min, slider_max, (85000.0, 400000.0))
+        # Filtro de Preços Fixo (Sem centavos)
+        min_p_data, max_p_data = int(df['Price'].min()), int(df['Price'].max())
+        slider_min = min(85000, min_p_data)
+        slider_max = max(400000, max_p_data)
+        p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
 
         df_f = df[
             (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
@@ -356,11 +356,15 @@ if not df.empty:
         e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Price', 'Launch Date'], index=2) 
         e_y = c2.selectbox(t("y_axis"), ['Price', 'Lenght'], index=0)
 
+# Formatação do Preço em BRL (R$ 300.000) sem centavos para o tooltip
+        df_f = df_f.copy()
+        df_f['Price (BRL)'] = df_f['Price'].apply(lambda x: f"R$ {int(x):,}".replace(",", "."))
+
         # Legenda agrupada por Categoria ('Type')
         fig = px.scatter(df_f, x=e_x, y=e_y, 
                          color='Type', 
                          text='Label', 
-                         hover_data=['Brand', 'Powertrain', 'Price', 'Month_Year', 'Type of info'])
+                         hover_data={'Brand': True, 'Powertrain': True, 'Price (BRL)': True, 'Month_Year': True, 'Type of info': True, 'Price': False}) # Desliga o Price cru
         
         def get_scale(series):
             if pd.api.types.is_numeric_dtype(series):
@@ -469,7 +473,8 @@ if not df.empty:
                     nt = st.selectbox(t("category") + " *", type_list)
                 with col_f2:
                     npt = st.selectbox(t("powertrain") + " *", ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
-                    np = st.number_input(t("price") + " *", min_value=0.0, step=1000.0)
+                    # Forçado como Inteiro para ignorar centavos
+                    np = st.number_input(t("price") + " *", min_value=0, step=1000)
                     nl = st.number_input(t("length"), min_value=0, step=1)
                 with col_f3:
                     # Ajuste no Cadastro de Veículos: Remoção dos inputs de width e height
@@ -517,7 +522,8 @@ if not df.empty:
                 with col2:
                     pts = ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"]
                     ept = st.selectbox(t("powertrain") + " *", pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
-                    ep = st.number_input(t("price") + " *", min_value=0.0, step=1000.0, value=float(row_edit['Price']))
+                    # Forçado como Inteiro para ignorar centavos
+                    ep = st.number_input(t("price") + " *", min_value=0, step=1000, value=int(row_edit['Price']))
                     el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
                 with col3:
                     ew = st.number_input(t("width"), min_value=0, step=1, value=int(row_edit['Width']) if pd.notnull(row_edit['Width']) else 0)
