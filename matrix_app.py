@@ -19,7 +19,7 @@ st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layo
 
 CACHE_FILE = "token_cache.bin"
 
-# Dicionário de Internacionalização (i18n) - Atualizado para Fase 4
+# Dicionário de Internacionalização (i18n) - Atualizado e Completo
 translations = {
     "EN": {
         "login_title": "🔒 Login - Market Intelligence",
@@ -57,6 +57,9 @@ translations = {
         "save": "Save & Sync",
         "select_edit": "Select Vehicle to Edit",
         "news_desc": "Latest launch news. Filter by date and click 'Fast Register' to auto-fill the form below.",
+        "fetch_news_btn": "📰 Fetch News (On-Demand)",
+        "start_date": "Start Date",
+        "end_date": "End Date",
         "loading_news": "Scanning news portals...",
         "no_news": "No recent launch news found for the selected period.",
         "fast_register": "⚡ Fast Register",
@@ -102,6 +105,9 @@ translations = {
         "save": "保存并同步",
         "select_edit": "选择要编辑的车辆",
         "news_desc": "最新发布新闻。按日期筛选并点击“快速注册”自动填充下方表单。",
+        "fetch_news_btn": "📰 获取新闻 (按需)",
+        "start_date": "开始日期",
+        "end_date": "结束日期",
         "loading_news": "扫描新闻门户...",
         "no_news": "在所选期间未找到最近的发布新闻。",
         "fast_register": "⚡ 快速注册",
@@ -244,35 +250,28 @@ def save_data(df, token):
 @st.cache_data(ttl=1800) 
 def fetch_automotive_news():
     feeds = [
-    # --- Os 8 Principais (Anteriormente citados) ---
-    "https://motor1.uol.com.br/rss/news/all/",
-    "https://insideevs.uol.com.br/rss/news/all/",
-    "https://www.automotivebusiness.com.br/rss/",
-    "https://autoesporte.globo.com/rss/autoesporte/",
-    "https://quatrorodas.abril.com.br/feed/",
-    "https://www.mobiauto.com.br/revista/rss",
-    "https://www.noticiasautomotivas.com.br/feed/",
-    "https://garagem360.com.br/feed/",
-    
-    # --- Inteligência de Mercado e Segredos (Novos) ---
-    "https://www.autossegredos.com.br/feed/",
-    "https://autoentusiastas.com.br/feed/",
-    "https://www.autoo.com.br/noticias/rss.xml",
-    "https://vrum.com.br/feed/",
-    "https://car.blog.br/feeds/posts/default",
-    
-    # --- Negócios e Economia ---
-    "https://valor.globo.com/rss/brasil/setor-automotivo/",
-    "https://exame.com/noticias-sobre/setor-automotivo/feed/",
-    "https://forbes.com.br/forbes-motors/feed/",
-    
-    # --- Grande Mídia e Marketplaces ---
-    "https://jornaldocarro.estadao.com.br/feed/",
-    "https://www.webmotors.com.br/wm1/rss",
-    "https://www.icarros.com.br/noticias/rss"
-]
+        "https://motor1.uol.com.br/rss/news/all/",
+        "https://insideevs.uol.com.br/rss/news/all/",
+        "https://www.automotivebusiness.com.br/rss/",
+        "https://autoesporte.globo.com/rss/autoesporte/",
+        "https://quatrorodas.abril.com.br/feed/",
+        "https://www.mobiauto.com.br/revista/rss",
+        "https://www.noticiasautomotivas.com.br/feed/",
+        "https://garagem360.com.br/feed/",
+        "https://www.autossegredos.com.br/feed/",
+        "https://autoentusiastas.com.br/feed/",
+        "https://www.autoo.com.br/noticias/rss.xml",
+        "https://vrum.com.br/feed/",
+        "https://car.blog.br/feeds/posts/default",
+        "https://valor.globo.com/rss/brasil/setor-automotivo/",
+        "https://exame.com/noticias-sobre/setor-automotivo/feed/",
+        "https://forbes.com.br/forbes-motors/feed/",
+        "https://jornaldocarro.estadao.com.br/feed/",
+        "https://www.webmotors.com.br/wm1/rss",
+        "https://www.icarros.com.br/noticias/rss"
+    ]
     keywords = ['lançamento', 'novo', 'chega', 'flagra', 'híbrido', 'elétrico', 'rumores', 'segredo', 'projeção', 'facelift', 'reestilização', 'pré-venda', 'preços', 'SUV', 'PHEV', 'BEV', 'nacionalização', 'confirma']
-    brands = ['OMODA','JAECOO','GEELY','GAC','BYD', 'GWM', 'CHERY', 'VOLKSWAGEN', 'VW', 'TOYOTA', 'FIAT', 'OMODA', 'JAECOO', 'RENAULT']
+    brands = ['OMODA','JAECOO','GEELY','GAC','BYD', 'GWM', 'CHERY', 'VOLKSWAGEN', 'VW', 'TOYOTA', 'FIAT', 'RENAULT']
     
     news_data = []
     for url in feeds:
@@ -408,19 +407,19 @@ if not df.empty:
 
         st.plotly_chart(fig, use_container_width=True)
 
-# ==================== ABA 2: NEWS RADAR & CADASTRO IN-PAGE ====================
+    # ==================== ABA 2: NEWS RADAR & CADASTRO IN-PAGE ====================
     with tab2:
         st.subheader(t("tab_radar"))
         st.markdown(f"*{t('news_desc')}*")
         
-        # --- BOTÃO SOB DEMANDA (Evita o carregamento automático) ---
-        if st.button("📰 Buscar Notícias (On-Demand)", use_container_width=True):
+        # --- BOTÃO SOB DEMANDA COM i18n ---
+        if st.button(t("fetch_news_btn"), use_container_width=True):
             st.session_state['show_news'] = True
         
-        # Filtro de Timeframe
+        # Filtro de Timeframe com i18n
         col_dates = st.columns(2)
-        start_news = col_dates[0].date_input("Start Date", date.today().replace(day=1))
-        end_news = col_dates[1].date_input("End Date", date.today())
+        start_news = col_dates[0].date_input(t("start_date"), date.today().replace(day=1))
+        end_news = col_dates[1].date_input(t("end_date"), date.today())
         
         # Só executa o RSS se o botão foi clicado (estado salvo na sessão)
         if st.session_state.get('show_news', False):
@@ -474,7 +473,7 @@ if not df.empty:
                     nd = st.date_input(t("launch_window"))
                     ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
-if st.form_submit_button(t("save")):
+                if st.form_submit_button(t("save")):
                     # Validação de Campos Obrigatórios
                     if not nb or not nn or not nt or not npt or np <= 0:
                         st.warning(t("mandatory_warning"))
@@ -484,12 +483,11 @@ if st.form_submit_button(t("save")):
                             'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 
                             'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
                         }
-                            if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
+                        if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
                             # Limpeza de variáveis do Fast Register
                             if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
                             if 'fast_title' in st.session_state: del st.session_state['fast_title']
                             
-                            # --- A MÁGICA ACONTECE AQUI ---
                             # Desliga o Radar para que ele não recarregue no próximo boot
                             st.session_state['show_news'] = False 
                             
@@ -538,7 +536,7 @@ if st.form_submit_button(t("save")):
                         df.at[idx, 'Lenght'] = el
                         df.at[idx, 'Width'] = ew
                         df.at[idx, 'Height'] = eh
-                        df.at[idx, 'Launch Date'] = pd.to_datetime(ed) # <-- CORREÇÃO APLICADA
+                        df.at[idx, 'Launch Date'] = pd.to_datetime(ed) # <-- Correção do KeyError aplicada
                         df.at[idx, 'Type of info'] = es
                         
                         if save_data(df, token_atual):
