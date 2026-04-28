@@ -349,8 +349,8 @@ if not df.empty:
         c1, c2 = st.columns(2)
         y_axis_label = 'Month_Year' if view_mode == t("month") else 'Quarter'
         
-        e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Price', 'Launch Date'], index=4) 
-        e_y = c2.selectbox(t("y_axis"), ['Price', 'Lenght'], index=1)
+        e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Width', 'Height', 'Price', 'Launch Date'], index=4) 
+        e_y = c2.selectbox(t("y_axis"), [y_axis_label, 'Price', 'Lenght', 'Width', 'Height'], index=1)
 
         # Legenda agrupada por Categoria ('Type')
         fig = px.scatter(df_f, x=e_x, y=e_y, 
