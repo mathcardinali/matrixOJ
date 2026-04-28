@@ -247,8 +247,8 @@ def fetch_automotive_news():
         "https://motor1.uol.com.br/rss/news/all/",
         "https://insideevs.uol.com.br/rss/news/all/"
     ]
-    keywords = ['lançamento', 'novo', 'chega', 'flagra', 'híbrido', 'elétrico', 'suv']
-    brands = ['BYD', 'GWM', 'CHERY', 'VOLKSWAGEN', 'VW', 'TOYOTA', 'FIAT', 'OMODA', 'JAECOO', 'RENAULT']
+    keywords = ['lançamento', 'novo', 'chega', 'flagra', 'híbrido', 'elétrico', 'rumores', 'segredo', 'projeção', 'facelift', 'reestilização', 'pré-venda', 'preços', 'SUV', 'PHEV', 'BEV', 'nacionalização', 'confirma']
+    brands = ['OMODA','JAECOO','GEELY','GAC','BYD', 'GWM', 'CHERY', 'VOLKSWAGEN', 'VW', 'TOYOTA', 'FIAT', 'OMODA', 'JAECOO', 'RENAULT']
     
     news_data = []
     for url in feeds:
