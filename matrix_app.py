@@ -484,7 +484,7 @@ if st.form_submit_button(t("save")):
                             'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 
                             'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
                         }
-                        if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
+                            if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
                             # Limpeza de variáveis do Fast Register
                             if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
                             if 'fast_title' in st.session_state: del st.session_state['fast_title']
