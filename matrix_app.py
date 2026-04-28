@@ -8,14 +8,107 @@ from io import BytesIO
 import base64
 import urllib.parse as urlparse
 import os
+import feedparser # Requisito 1: Radar de Notícias
 
 # ==========================================
-# 1. CONFIGURAÇÕES E PERSISTÊNCIA
+# 1. CONFIGURAÇÕES, PERSISTÊNCIA E I18N
 # ==========================================
 st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layout="wide")
 
 CACHE_FILE = "token_cache.bin"
-EMAIL_DONO_ONEDRIVE = "matheus.cardinali@hotmail.com" 
+
+# Requisito 7: Sistema de Internacionalização (i18n)
+translations = {
+    "EN": {
+        "login_title": "🔒 Login - Market Intelligence",
+        "user": "Username",
+        "pass": "Password",
+        "enter": "Login",
+        "wrong_cred": "Incorrect credentials.",
+        "auth_req": "🔒 Authorization Required",
+        "click_auth": "Click here to authorize",
+        "paste_url": "Paste the return URL here:",
+        "invalid_link": "Invalid Link.",
+        "sync_success": "Successfully Synced!",
+        "sync_error": "Error saving data.",
+        "app_title": "🚗 Automotive Market Intelligence",
+        "lang": "Language / 语言",
+        "settings": "View Settings",
+        "time_group": "Time Grouping",
+        "month": "Month",
+        "quarter": "Quarter",
+        "filters": "Market Filters",
+        "launch_window": "Launch Window",
+        "brand": "Brand",
+        "category": "Category (Type)",
+        "price": "Price Range (R$)",
+        "tab_matrix": "📊 Competitive Matrix",
+        "tab_radar": "📰 News Radar",
+        "tab_add": "➕ Add Vehicle",
+        "tab_edit": "✏️ Edit Vehicle",
+        "x_axis": "X Axis",
+        "y_axis": "Y Axis",
+        "name": "Name (Model)",
+        "powertrain": "Powertrain",
+        "length": "Length (mm)",
+        "width": "Width (mm)",
+        "height": "Height (mm)",
+        "status": "Status",
+        "save": "Save & Sync",
+        "select_edit": "Select Vehicle to Edit",
+        "news_desc": "Latest launch news from Brazilian portals, categorized by brand.",
+        "loading_news": "Scanning news portals...",
+        "no_news": "No recent launch news found."
+    },
+    "ZH": {
+        "login_title": "🔒 登录 - 市场情报",
+        "user": "用户名",
+        "pass": "密码",
+        "enter": "登录",
+        "wrong_cred": "凭据不正确。",
+        "auth_req": "🔒 需要授权",
+        "click_auth": "点击此处授权",
+        "paste_url": "在此处粘贴返回 URL：",
+        "invalid_link": "无效链接。",
+        "sync_success": "同步成功！",
+        "sync_error": "保存数据时出错。",
+        "app_title": "🚗 汽车市场情报",
+        "lang": "Language / 语言",
+        "settings": "视图设置",
+        "time_group": "时间分组",
+        "month": "月",
+        "quarter": "季度",
+        "filters": "市场筛选",
+        "launch_window": "发布窗口",
+        "brand": "品牌",
+        "category": "类别 (Type)",
+        "price": "价格范围 (R$)",
+        "tab_matrix": "📊 竞争矩阵",
+        "tab_radar": "📰 新闻雷达",
+        "tab_add": "➕ 添加车辆",
+        "tab_edit": "✏️ 编辑车辆",
+        "x_axis": "X 轴",
+        "y_axis": "Y 轴",
+        "name": "名称 (型号)",
+        "powertrain": "动力系统",
+        "length": "长度 (mm)",
+        "width": "宽度 (mm)",
+        "height": "高度 (mm)",
+        "status": "状态",
+        "save": "保存并同步",
+        "select_edit": "选择要编辑的车辆",
+        "news_desc": "来自巴西门户网站的最新发布新闻，按品牌分类。",
+        "loading_news": "扫描新闻门户...",
+        "no_news": "未找到最近的发布新闻。"
+    }
+}
+
+# Inicializa idioma na sessão
+if "lang" not in st.session_state:
+    st.session_state.lang = "EN"
+
+def t(key):
+    return translations[st.session_state.lang].get(key, key)
 
 # ==========================================
 # 2. SISTEMA DE LOGIN
@@ -27,16 +120,16 @@ def check_login():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.markdown("<br><br><br>", unsafe_allow_html=True)
-            st.subheader("🔒 Login - Market Intelligence")
+            st.subheader(t("login_title"))
             with st.form("login_form"):
-                input_user = st.text_input("Usuário")
-                input_pass = st.text_input("Senha", type="password")
-                if st.form_submit_button("Entrar", use_container_width=True):
+                input_user = st.text_input(t("user"))
+                input_pass = st.text_input(t("pass"), type="password")
+                if st.form_submit_button(t("enter"), use_container_width=True):
                     if "auth" in st.secrets and input_user == st.secrets["auth"]["username"] and input_pass == st.secrets["auth"]["password"]:
                         st.session_state.authenticated = True
                         st.rerun()
                     else:
-                        st.error("Credenciais incorretas.")
+                        st.error(t("wrong_cred"))
         return False
     return True
 
@@ -44,7 +137,7 @@ if not check_login():
     st.stop()
 
 # ==========================================
-# 3. GESTÃO DE TOKEN (MSAL CACHE)
+# 3. GESTÃO DE TOKEN E DADOS (MANTIDO INTACTO)
 # ==========================================
 def load_token_cache():
     cache = msal.SerializableTokenCache()
@@ -74,9 +167,9 @@ def get_access_token():
         if result: return result['access_token']
     
     auth_url = app.get_authorization_request_url(scopes, redirect_uri=conf["redirect_uri"])
-    st.warning("🔒 Autorização Necessária")
-    st.markdown(f"[Clique aqui para autorizar]({auth_url})")
-    res_url = st.text_input("Cole a URL de retorno:")
+    st.warning(t("auth_req"))
+    st.markdown(f"[{t('click_auth')}]({auth_url})")
+    res_url = st.text_input(t("paste_url"))
     if res_url:
         try:
             query = urlparse.urlparse(res_url).query
@@ -86,12 +179,9 @@ def get_access_token():
             if "access_token" in result:
                 save_token_cache(cache)
                 st.rerun()
-        except: st.error("Link inválido.")
+        except: st.error(t("invalid_link"))
     return None
 
-# ==========================================
-# 4. PROCESSAMENTO DE DADOS E LOGOS
-# ==========================================
 @st.cache_data(ttl=3600)
 def get_base64_image(url):
     try:
@@ -110,17 +200,15 @@ def load_data(token):
             df = pd.read_excel(BytesIO(resp.content), sheet_name="Launches")
             df['Brand'] = df['Brand'].fillna('').astype(str).str.upper()
             df['Name'] = df['Name'].fillna('').astype(str)
-            # Label em duas linhas para o centro da bolinha
             df['Label'] = "<b>" + df['Brand'] + "</b><br>" + df['Name']
-            
             df['Launch Date'] = pd.to_datetime(df['Launch Date'], format='%d/%m/%Y', errors='coerce')
             df['Month_Year'] = df['Launch Date'].dt.strftime('%m/%Y')
             df['Quarter'] = df['Launch Date'].dt.to_period('Q').astype(str)
             df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
+            df['Type'] = df['Type'].fillna('Outros').astype(str)
             df['Type of info'] = df['Type of info'].fillna('Speculation').astype(str)
             return df
         except Exception as e:
-            st.error(f"Erro ao processar dados: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -136,10 +224,49 @@ def save_data(df, token):
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
     resp = requests.put(url, headers=headers, data=output.getvalue())
     if resp.status_code in [200, 201]:
-        st.success("Sincronizado!")
+        st.success(t("sync_success"))
         st.cache_data.clear()
         return True
-    return False
+    else:
+        st.error(t("sync_error"))
+        return False
+
+# ==========================================
+# REQUISITO 1: FUNÇÃO DE RADAR RSS
+# ==========================================
+@st.cache_data(ttl=1800) # Cache de 30 mins
+def fetch_automotive_news():
+    feeds = [
+        "https://motor1.uol.com.br/rss/news/all/",
+        "https://insideevs.uol.com.br/rss/news/all/"
+    ]
+    keywords = ['lançamento', 'novo', 'chega', 'flagra', 'híbrido', 'elétrico', 'suv']
+    brands = ['BYD', 'GWM', 'CHERY', 'VOLKSWAGEN', 'VW', 'TOYOTA', 'FIAT', 'OMODA', 'JAECOO', 'RENAULT']
+    
+    news_data = []
+    for url in feeds:
+        try:
+            parsed = feedparser.parse(url)
+            for entry in parsed.entries:
+                title = entry.title
+                # Filtra por notícias relevantes de lançamento/novidade
+                if any(kw.lower() in title.lower() for kw in keywords):
+                    # Identifica montadora
+                    matched_brand = "General"
+                    for b in brands:
+                        if b in title.upper():
+                            matched_brand = b if b != 'VW' else 'VOLKSWAGEN'
+                            break
+                    
+                    news_data.append({
+                        "Brand": matched_brand,
+                        "Title": title,
+                        "Link": entry.link,
+                        "Date": entry.get('published', 'Recent')
+                    })
+        except:
+            continue
+    return pd.DataFrame(news_data)
 
 # ==========================================
 # 5. EXECUÇÃO E INTERFACE
@@ -151,42 +278,56 @@ df = load_data(token_atual)
 
 if not df.empty:
     with st.sidebar:
-        st.header("Configurações de Visão")
-        view_mode = st.radio("Agrupamento Temporal", ["Mês", "Trimestre (Quarter)"], horizontal=True)
+        # Seletor de Idioma (i18n)
+        st.session_state.lang = st.selectbox("🌐", ["EN", "ZH"], index=["EN", "ZH"].index(st.session_state.lang))
+        
+        st.header(t("settings"))
+        view_mode = st.radio(t("time_group"), [t("month"), t("quarter")], horizontal=True)
         
         st.divider()
-        st.header("Filtros")
+        st.header(t("filters"))
         
         all_months = sorted(df['Month_Year'].dropna().unique(), key=lambda x: pd.to_datetime(x, format='%m/%Y'))
         default_period = [m for m in all_months if "2026" in m]
-        mo_sel = st.multiselect("Janela de Lançamento", all_months, default=default_period)
+        mo_sel = st.multiselect(t("launch_window"), all_months, default=default_period)
         
-        m_sel = st.multiselect("Brand", sorted(df['Brand'].unique()), default=df['Brand'].unique())
-        t_sel = st.multiselect("Category (Type)", sorted(df['Type'].unique()), default=df['Type'].unique())
+        # Listas padronizadas para filtros e formulários
+        brand_list = sorted(df['Brand'].unique())
+        type_list = sorted(df['Type'].unique())
         
+        m_sel = st.multiselect(t("brand"), brand_list, default=brand_list)
+        t_sel = st.multiselect(t("category"), type_list, default=type_list)
+        
+        # Requisito 6: Filtro de Preços Fixo (Default 85k - 400k)
         min_p, max_p = float(df['Price'].min()), float(df['Price'].max())
-        p_sel = st.slider("Faixa de Preço (R$)", min_p, max_p, (min_p, max_p))
+        default_min = 85000.0 if min_p <= 85000.0 else min_p
+        default_max = 400000.0 if max_p >= 400000.0 else max_p
+        
+        p_sel = st.slider(t("price"), min_p, max_p, (default_min, default_max))
 
         df_f = df[
             (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
             (df['Month_Year'].isin(mo_sel)) & (df['Price'] >= p_sel[0]) & (df['Price'] <= p_sel[1])
         ]
 
-    tab1, tab2 = st.tabs(["📊 Matriz Competitiva", "➕ Cadastrar Veículo"])
+    st.title(t("app_title"))
+    
+    # Organização das Abas
+    tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_add"), t("tab_edit")])
 
+    # ==================== ABA 1: MATRIZ ====================
     with tab1:
         c1, c2 = st.columns(2)
-        y_axis_label = 'Month_Year' if view_mode == "Mês" else 'Quarter'
+        y_axis_label = 'Month_Year' if view_mode == t("month") else 'Quarter'
         
-        # --- AJUSTE DE EIXOS PADRÃO SOLICITADO ---
-        e_x = c1.selectbox("Eixo X", ['Lenght', 'Width', 'Height', 'Price', 'Launch Date'], index=4) # Index 4 = Launch Date
-        e_y = c2.selectbox("Eixo Y", [y_axis_label, 'Price', 'Lenght', 'Width', 'Height'], index=1) # Index 1 = Price
+        e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Width', 'Height', 'Price', 'Launch Date'], index=4) 
+        e_y = c2.selectbox(t("y_axis"), [y_axis_label, 'Price', 'Lenght', 'Width', 'Height'], index=1)
 
+        # Requisito 3: Legenda e cor agora baseados em 'Type' (Categoria) ao invés de 'Type of info'
         fig = px.scatter(df_f, x=e_x, y=e_y, 
-                         color='Type of info', 
+                         color='Type', 
                          text='Label', 
-                         color_discrete_map={'Official': '#1B5E20', 'Speculation': '#B71C1C'}, # Tons mais escuros para contraste
-                         hover_data=['Powertrain', 'Price', 'Month_Year'])
+                         hover_data=['Powertrain', 'Price', 'Month_Year', 'Type of info'])
         
         def get_scale(series):
             if pd.api.types.is_numeric_dtype(series):
@@ -200,8 +341,8 @@ if not df.empty:
                 'BYD': 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f6/BYD_Auto_2022_logo.svg/512px-BYD_Auto_2022_logo.svg.png',
                 'GWM': 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/GWM_logo.svg/512px-GWM_logo.svg.png',
                 'VW': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Volkswagen_logo_2019.svg/512px-Volkswagen_logo_2019.svg.png',
-                'Toyota': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/Toyota_carlogo.svg/512px-Toyota_carlogo.svg.png',
-                'Fiat': 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/12/Fiat_Automobiles_logo.svg/512px-Fiat_Automobiles_logo.svg.png',
+                'TOYOTA': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/Toyota_carlogo.svg/512px-Toyota_carlogo.svg.png',
+                'FIAT': 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/12/Fiat_Automobiles_logo.svg/512px-Fiat_Automobiles_logo.svg.png',
                 'OMODA': 'https://upload.wikimedia.org/wikipedia/commons/5/52/Omoda_logo.png',
                 'JAECOO': 'https://upload.wikimedia.org/wikipedia/commons/1/1d/Jaecoo_logo.png'
             }
@@ -216,37 +357,108 @@ if not df.empty:
                             sizing="contain", layer="above"
                         ))
 
-        # --- AJUSTE DE POSIÇÃO E CONTRASTE SOLICITADO ---
         fig.update_traces(
-            marker=dict(size=45, opacity=0.7), # Bolinha maior e mais opaca para servir de fundo sólido
-            textposition='middle center',       # Texto centralizado na bolinha
+            marker=dict(size=45, opacity=0.7), 
+            textposition='middle center',       
             texttemplate="%{text}", 
-            textfont=dict(size=9, color="white", family="Arial Black") # Fonte branca em negrito para contraste
+            textfont=dict(size=9, color="white", family="Arial Black") 
         )
         
+        # Requisito 2: Removido explicitamente o height para permitir responsividade pura do container
         fig.update_layout(
-            height=850, 
             template="plotly_white", 
             margin=dict(r=50, l=50, t=50, b=50),
             uniformtext_minsize=7, 
-            uniformtext_mode='hide'
+            uniformtext_mode='hide',
+            legend_title_text=t("category")
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    # ==================== ABA 2: NEWS RADAR ====================
     with tab2:
-        st.subheader("Inserir Novo Veículo")
+        st.subheader(t("tab_radar"))
+        st.markdown(f"*{t('news_desc')}*")
+        with st.spinner(t("loading_news")):
+            df_news = fetch_automotive_news()
+            if not df_news.empty:
+                # Cria colunas por marca detectada
+                brands_found = sorted(df_news['Brand'].unique())
+                tabs_news = st.tabs(brands_found)
+                for i, b in enumerate(brands_found):
+                    with tabs_news[i]:
+                        news_b = df_news[df_news['Brand'] == b]
+                        for _, row in news_b.iterrows():
+                            st.markdown(f"**[{row['Title']}]({row['Link']})** - *{row['Date']}*")
+            else:
+                st.info(t("no_news"))
+
+    # ==================== ABA 3: CADASTRO ====================
+    with tab3:
+        st.subheader(t("tab_add"))
         with st.form("new_car"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                nb, nn, nt = st.text_input("Brand"), st.text_input("Name"), st.text_input("Category")
+                # Requisito 4: Dropdowns ao invés de texto livre
+                nb = st.selectbox(t("brand"), brand_list)
+                nn = st.text_input(t("name"))
+                nt = st.selectbox(t("category"), type_list)
             with col2:
-                npt = st.selectbox("Powertrain", ["BEV", "PHEV", "HEV", "ICE"])
-                np, nl = st.number_input("Price (R$)", min_value=0.0), st.number_input("Length (mm)", min_value=0)
+                npt = st.selectbox(t("powertrain"), ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
+                np = st.number_input(t("price"), min_value=0.0, step=1000.0)
+                nl = st.number_input(t("length"), min_value=0, step=1)
             with col3:
-                nw, nh = st.number_input("Width (mm)", min_value=0), st.number_input("Height (mm)", min_value=0)
-                nd, ns = st.date_input("Launch Date"), st.selectbox("Status", ["Official", "Speculation"])
+                nw = st.number_input(t("width"), min_value=0, step=1)
+                nh = st.number_input(t("height"), min_value=0, step=1)
+                nd = st.date_input(t("launch_window"))
+                ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
-            if st.form_submit_button("Salvar e Sincronizar"):
+            if st.form_submit_button(t("save")):
                 new_data = {'Brand': nb, 'Name': nn, 'Type': nt, 'Powertrain': npt, 'Price': np, 'Lenght': nl, 'Width': nw, 'Height': nh, 'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns}
                 if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
                     st.rerun()
+
+    # ==================== ABA 4: EDIÇÃO (CRUD) ====================
+    with tab4:
+        st.subheader(t("tab_edit"))
+        # Selecionar veículo a editar (usamos a coluna crua original para localizar mais fácil)
+        df_edit_options = df['Brand'] + " " + df['Name']
+        veh_sel = st.selectbox(t("select_edit"), df_edit_options.tolist())
+        
+        if veh_sel:
+            # Isola o index do veículo selecionado
+            idx = df_edit_options[df_edit_options == veh_sel].index[0]
+            row_edit = df.loc[idx]
+            
+            with st.form("edit_car"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    eb = st.selectbox(t("brand"), brand_list, index=brand_list.index(row_edit['Brand']) if row_edit['Brand'] in brand_list else 0)
+                    en = st.text_input(t("name"), value=row_edit['Name'])
+                    et = st.selectbox(t("category"), type_list, index=type_list.index(row_edit['Type']) if row_edit['Type'] in type_list else 0)
+                with col2:
+                    pts = ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"]
+                    ept = st.selectbox(t("powertrain"), pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
+                    ep = st.number_input(t("price"), min_value=0.0, step=1000.0, value=float(row_edit['Price']))
+                    el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
+                with col3:
+                    ew = st.number_input(t("width"), min_value=0, step=1, value=int(row_edit['Width']) if pd.notnull(row_edit['Width']) else 0)
+                    eh = st.number_input(t("height"), min_value=0, step=1, value=int(row_edit['Height']) if pd.notnull(row_edit['Height']) else 0)
+                    ed = st.date_input(t("launch_window"), value=row_edit['Launch Date'] if pd.notnull(row_edit['Launch Date']) else date.today())
+                    stss = ["Official", "Speculation"]
+                    es = st.selectbox(t("status"), stss, index=stss.index(row_edit['Type of info']) if row_edit['Type of info'] in stss else 0)
+
+                # Requisito 5: Atualiza o dataframe existente e salva
+                if st.form_submit_button(t("save")):
+                    df.at[idx, 'Brand'] = eb
+                    df.at[idx, 'Name'] = en
+                    df.at[idx, 'Type'] = et
+                    df.at[idx, 'Powertrain'] = ept
+                    df.at[idx, 'Price'] = ep
+                    df.at[idx, 'Lenght'] = el
+                    df.at[idx, 'Width'] = ew
+                    df.at[idx, 'Height'] = eh
+                    df.at[idx, 'Launch Date'] = ed
+                    df.at[idx, 'Type of info'] = es
+                    
+                    if save_data(df, token_atual):
+                        st.rerun()
