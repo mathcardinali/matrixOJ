@@ -257,23 +257,38 @@ def load_spec_data(token):
             df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
             df_price = pd.read_excel(excel_data, sheet_name='Price_Policy')
 
-            # 1. Blindagem: Remove espaços ocultos nos nomes das colunas de todos os dataframes
+            # 1. Blindagem: Remove espaços ocultos no início/fim dos nomes das colunas
             for df_temp in [df_keys, df_fipe, df_dim, df_price]:
-                df_temp.columns = df_temp.columns.str.strip()
+                df_temp.columns = df_temp.columns.astype(str).str.strip()
 
-            # 2. Padronização de Colunas de Chave
-            if 'Dimension_Key' in df_keys.columns:
-                df_keys.rename(columns={'Dimension_Key': 'Dimensions_Key'}, inplace=True)
-            if 'Dimension_Key' in df_price.columns:
-                df_price.rename(columns={'Dimension_Key': 'Dimensions_Key'}, inplace=True)
-            if 'Modelo' in df_keys.columns and 'Dimensions_Key' not in df_keys.columns:
-                df_keys.rename(columns={'Modelo': 'Dimensions_Key'}, inplace=True)
+            # 2. Função inteligente para encontrar e padronizar as colunas (Fuzzy Matching)
+            def padronizar_coluna(df, nomes_aceitos, nome_final):
+                for col in df.columns:
+                    if col.lower() in [n.lower() for n in nomes_aceitos]:
+                        df.rename(columns={col: nome_final}, inplace=True)
+                        break
+
+            # Padroniza Aba Keys
+            padronizar_coluna(df_keys, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
+            padronizar_coluna(df_keys, ['Fipe_Key', 'Fipe Key', 'Modelo_Versao', 'Fipe', 'Modelo Fipe'], 'Fipe_Key')
+
+            # Padroniza Aba Price Policy
+            padronizar_coluna(df_price, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
+            padronizar_coluna(df_price, ['Price', 'Preço', 'Preco', 'Valor'], 'Price')
+
+            # Padroniza Aba Fipe
+            padronizar_coluna(df_fipe, ['Modelo_Versao', 'Modelo Versao', 'Fipe_Key', 'Modelo', 'Veiculo', 'Name'], 'MODELO_VERSAO')
+            padronizar_coluna(df_fipe, ['TIV', 'Volume', 'Vendas', 'Emplacamentos'], 'TIV')
+
+            # Verifica se a chave primária foi encontrada após a tentativa de padronização
+            if 'Dimensions_Key' not in df_keys.columns:
+                raise KeyError(f"Aba 'Keys' não possui uma coluna de ligação válida. Colunas encontradas: {list(df_keys.columns)}")
 
             # Agrupar Volume TIV (Year-to-Date)
             fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
 
             # Melt na aba de Dimensões
-            dim_col = df_dim.columns[0]
+            dim_col = df_dim.columns[0] # Pega dinamicamente a primeira coluna
             dim_melt = df_dim.melt(id_vars=[dim_col], var_name='Dimensions_Key', value_name='Value')
             dim_melt.rename(columns={dim_col: 'Dimension'}, inplace=True)
             
@@ -285,7 +300,7 @@ def load_spec_data(token):
             if 'Fipe_Key' in merged.columns:
                 merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
             else:
-                # Fallback caso a coluna Fipe_Key não exista
+                # Fallback: Se não tem coluna De/Para Fipe, tenta cruzar direto pelo nome
                 merged = merged.merge(fipe_ytd, left_on='Dimensions_Key', right_on='MODELO_VERSAO', how='left')
                 
             if 'Dimensions_Key' in df_price.columns:
@@ -293,30 +308,16 @@ def load_spec_data(token):
             else:
                 merged['Price'] = 0
 
+            # Garantir que TIV e Price sejam numéricos para o gráfico de dispersão
             merged['TIV'] = pd.to_numeric(merged.get('TIV', 0), errors='coerce').fillna(0)
             merged['Price'] = pd.to_numeric(merged.get('Price', 0), errors='coerce').fillna(0)
 
             return merged
         except Exception as e:
-            st.error(f"Erro no processamento da planilha: {e}. Verifique as abas Keys, Fipe e Price_Policy.")
+            # Em vez de apenas retornar vazio, mostra o erro EXATO na tela para você debugar
+            st.error(f"⚠️ Erro de Estrutura no Excel: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
-
-def save_data(df, token):
-    output = BytesIO()
-    df_save = df.copy()
-    cols = [c for c in df_save.columns if c not in ['Month_Year', 'Quarter', 'Label']]
-    df_to_xlsx = df_save[cols]
-    df_to_xlsx['Launch Date'] = pd.to_datetime(df_to_xlsx['Launch Date']).dt.strftime('%d/%m/%Y')
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_to_xlsx.to_excel(writer, sheet_name="Launches", index=False)
-    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
-    resp = requests.put(url, headers=headers, data=output.getvalue())
-    if resp.status_code in [200, 201]:
-        st.cache_data.clear()
-        return True
-    return False
 
 # ==========================================
 # 4. FUNÇÃO DE RADAR RSS
