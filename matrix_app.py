@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from datetime import date, datetime
 from time import mktime
@@ -19,7 +20,7 @@ st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layo
 
 CACHE_FILE = "token_cache.bin"
 
-# Dicionário de Internacionalização (i18n) - Atualizado e Completo
+# Dicionário de Internacionalização (i18n) - Atualizado
 translations = {
     "EN": {
         "login_title": "🔒 Login - Market Intelligence",
@@ -46,6 +47,7 @@ translations = {
         "tab_matrix": "📊 Competitive Matrix",
         "tab_radar": "📰 News Radar & Fast Add",
         "tab_edit": "✏️ Edit Vehicle",
+        "tab_spec": "📉 Spec Dispersion",
         "x_axis": "X Axis",
         "y_axis": "Y Axis",
         "name": "Name (Model)",
@@ -69,7 +71,11 @@ translations = {
         "success_added": "✅ Vehicle {name} added successfully!",
         "others": "Others",
         "delete_btn": "🗑️ Delete Vehicle",
-        "success_deleted": "✅ Vehicle {name} deleted successfully!"
+        "success_deleted": "✅ Vehicle {name} deleted successfully!",
+        "dimension": "Dimension",
+        "installation_ratio": "Installation Ratio",
+        "optimal_price": "Optimal Price Point",
+        "opt_method": "Optimization Method"
     },
     "ZH": {
         "login_title": "🔒 登录 - 市场情报",
@@ -96,6 +102,7 @@ translations = {
         "tab_matrix": "📊 竞争矩阵",
         "tab_radar": "📰 新闻雷达与快速添加",
         "tab_edit": "✏️ 编辑车辆",
+        "tab_spec": "📉 规格分散",
         "x_axis": "X 轴",
         "y_axis": "Y 轴",
         "name": "名称 (型号)",
@@ -119,7 +126,11 @@ translations = {
         "success_added": "✅ 车辆 {name} 成功添加！",
         "others": "其他",
         "delete_btn": "🗑️ 删除车辆",
-        "success_deleted": "✅ 车辆 {name} 已成功删除！"
+        "success_deleted": "✅ 车辆 {name} 已成功删除！",
+        "dimension": "维度",
+        "installation_ratio": "安装率",
+        "optimal_price": "最佳价格点",
+        "opt_method": "优化方法"
     }
 }
 
@@ -232,6 +243,47 @@ def load_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
+# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) ---
+@st.cache_data(ttl=60)
+def load_spec_data(token):
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
+    headers = {'Authorization': f'Bearer {token}'}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        try:
+            excel_data = BytesIO(resp.content)
+            
+            # Carregar Abas do Escopo
+            df_keys = pd.read_excel(excel_data, sheet_name='Keys')
+            df_fipe = pd.read_excel(excel_data, sheet_name='Fipe')
+            df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
+            df_price = pd.read_excel(excel_data, sheet_name='Price_Policy')
+
+            # Agrupar Volume TIV (Year-to-Date) por MODELO_VERSAO na base Fipe
+            fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
+
+            # Melt na aba de Dimensões
+            dim_col = df_dim.columns[0] # Assume primeira coluna como o nome da dimensão
+            dim_melt = df_dim.melt(id_vars=[dim_col], var_name='Dimensions_Key', value_name='Value')
+            dim_melt.rename(columns={dim_col: 'Dimension'}, inplace=True)
+            
+            # Tratamento de regras: Vazio/NaN -> N, Resto segue S ou N
+            dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({'': 'N', ' ': 'N'})
+
+            # Cruzamento de Dados (JOINs)
+            merged = dim_melt.merge(df_keys, left_on='Dimensions_Key', right_on='Dimensions_Key', how='left')
+            merged = merged.merge(fipe_ytd, on='MODELO_VERSAO', how='left')
+            merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
+
+            merged['TIV'] = pd.to_numeric(merged['TIV'], errors='coerce').fillna(0)
+            merged['Price'] = pd.to_numeric(merged['Price'], errors='coerce').fillna(0)
+
+            return merged
+        except Exception as e:
+            # Caso as abas não existam ainda, silenciar o erro para não quebrar a aplicação raiz
+            return pd.DataFrame()
+    return pd.DataFrame()
+
 def save_data(df, token):
     output = BytesIO()
     df_save = df.copy()
@@ -328,11 +380,9 @@ if not df.empty:
         brand_list = sorted(df['Brand'].unique())
         type_list = sorted(df['Type'].unique())
         
-        # Garante exposição explícita das marcas no filtro
         m_sel = st.multiselect(t("brand"), brand_list, default=brand_list)
         t_sel = st.multiselect(t("category"), type_list, default=type_list)
         
-        # Filtro de Preços Fixo (Sem centavos)
         min_p_data, max_p_data = int(df['Price'].min()), int(df['Price'].max())
         slider_min = min(85000, min_p_data)
         slider_max = max(400000, max_p_data)
@@ -345,26 +395,24 @@ if not df.empty:
 
     st.title(t("app_title"))
     
-    # Abas consolidadas: Cadastro migrou para dentro do Radar
-    tab1, tab2, tab3 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit")])
+    # Novas Abas consolidadas com isolamento do Spec Dispersion
+    tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit"), t("tab_spec")])
 
     # ==================== ABA 1: MATRIZ ====================
     with tab1:
         c1, c2 = st.columns(2)
+        y_axis_label = 'Month_Year' if view_mode == t("month") else 'Quarter'
         
-        # Ajuste de Filtros (Eixos X e Y)
         e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Price', 'Launch Date'], index=2) 
         e_y = c2.selectbox(t("y_axis"), ['Price', 'Lenght'], index=0)
 
-# Formatação do Preço em BRL (R$ 300.000) sem centavos para o tooltip
         df_f = df_f.copy()
         df_f['Price (BRL)'] = df_f['Price'].apply(lambda x: f"R$ {int(x):,}".replace(",", "."))
 
-        # Legenda agrupada por Categoria ('Type')
         fig = px.scatter(df_f, x=e_x, y=e_y, 
                          color='Type', 
                          text='Label', 
-                         hover_data={'Brand': True, 'Powertrain': True, 'Price (BRL)': True, 'Month_Year': True, 'Type of info': True, 'Price': False}) # Desliga o Price cru
+                         hover_data={'Brand': True, 'Powertrain': True, 'Price (BRL)': True, 'Month_Year': True, 'Type of info': True, 'Price': False})
         
         def get_scale(series):
             if pd.api.types.is_numeric_dtype(series):
@@ -401,7 +449,6 @@ if not df.empty:
             textfont=dict(size=9, color="white", family="Arial Black") 
         )
         
-        # Respiro de 800px no layout, responsividade ligada
         fig.update_layout(
             height=800,
             template="plotly_white", 
@@ -420,22 +467,18 @@ if not df.empty:
         st.subheader(t("tab_radar"))
         st.markdown(f"*{t('news_desc')}*")
         
-        # --- BOTÃO SOB DEMANDA COM i18n ---
         if st.button(t("fetch_news_btn"), use_container_width=True):
             st.session_state['show_news'] = True
         
-        # Filtro de Timeframe com i18n
         col_dates = st.columns(2)
         start_news = col_dates[0].date_input(t("start_date"), date.today().replace(day=1))
         end_news = col_dates[1].date_input(t("end_date"), date.today())
         
-        # Só executa o RSS se o botão foi clicado (estado salvo na sessão)
         if st.session_state.get('show_news', False):
             with st.spinner(t("loading_news")):
                 df_news = fetch_automotive_news()
                 
                 if not df_news.empty:
-                    # Filtra pelas datas selecionadas
                     df_news = df_news[(df_news['Date'] >= start_news) & (df_news['Date'] <= end_news)]
                     
                     if not df_news.empty:
@@ -448,7 +491,6 @@ if not df.empty:
                                     n_col1, n_col2 = st.columns([4, 1])
                                     n_col1.markdown(f"**[{row['Title']}]({row['Link']})** - *{row['DateStr']}*")
                                     
-                                    # Fast Register Action
                                     if n_col2.button(t("fast_register"), key=f"btn_news_{idx}"):
                                         st.session_state['fast_brand'] = row['Brand'] if row['Brand'] != t("others") else brand_list[0]
                                         st.session_state['fast_title'] = row['Title'][:40] 
@@ -460,7 +502,6 @@ if not df.empty:
 
         st.markdown("---")
         
-        # --- Formulário de Cadastro Embutido (In-Page) ---
         default_brand_add = st.session_state.get('fast_brand', brand_list[0])
         default_name_add = st.session_state.get('fast_title', '')
 
@@ -473,16 +514,13 @@ if not df.empty:
                     nt = st.selectbox(t("category") + " *", type_list)
                 with col_f2:
                     npt = st.selectbox(t("powertrain") + " *", ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
-                    # Forçado como Inteiro para ignorar centavos
                     np = st.number_input(t("price") + " *", min_value=0, step=1000)
                     nl = st.number_input(t("length"), min_value=0, step=1)
                 with col_f3:
-                    # Ajuste no Cadastro de Veículos: Remoção dos inputs de width e height
                     nd = st.date_input(t("launch_window"))
                     ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
                 if st.form_submit_button(t("save")):
-                    # Validação de Campos Obrigatórios
                     if not nb or not nn or not nt or not npt or np <= 0:
                         st.warning(t("mandatory_warning"))
                     else:
@@ -492,15 +530,13 @@ if not df.empty:
                             'Launch Date': nd.strftime('%d/%m/%Y'), 'Type of info': ns
                         }
                         if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
-                            # Limpeza de variáveis do Fast Register
                             if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
                             if 'fast_title' in st.session_state: del st.session_state['fast_title']
                             
-                            # Desliga o Radar para que ele não recarregue no próximo boot
                             st.session_state['show_news'] = False 
                             
                             st.success(t("success_added").format(name=nn))
-                            time.sleep(2) # Pausa breve para o usuário ler o sucesso antes de recarregar
+                            time.sleep(2)
                             st.rerun()
 
     # ==================== ABA 3: EDIÇÃO (CRUD) ====================
@@ -522,17 +558,13 @@ if not df.empty:
                 with col2:
                     pts = ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"]
                     ept = st.selectbox(t("powertrain") + " *", pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
-                    # Forçado como Inteiro para ignorar centavos
                     ep = st.number_input(t("price") + " *", min_value=0, step=1000, value=int(row_edit['Price']))
                     el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
                 with col3:
-                    ew = st.number_input(t("width"), min_value=0, step=1, value=int(row_edit['Width']) if pd.notnull(row_edit['Width']) else 0)
-                    eh = st.number_input(t("height"), min_value=0, step=1, value=int(row_edit['Height']) if pd.notnull(row_edit['Height']) else 0)
-                    ed = st.date_input(t("launch_window"), value=row_edit['Launch Date'] if pd.notnull(row_edit['Launch Date']) else date.today())
+                    nd = st.date_input(t("launch_window"), value=row_edit['Launch Date'] if pd.notnull(row_edit['Launch Date']) else date.today())
                     stss = ["Official", "Speculation"]
                     es = st.selectbox(t("status"), stss, index=stss.index(row_edit['Type of info']) if row_edit['Type of info'] in stss else 0)
 
-                # Nova Função em Editar Veículos: Botões Salvar e Deletar
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
                     btn_save = st.form_submit_button(t("save"))
@@ -540,7 +572,6 @@ if not df.empty:
                     btn_delete = st.form_submit_button(t("delete_btn"))
 
                 if btn_save:
-                    # Revalidação para a edição
                     if not eb or not en or not et or not ept or ep <= 0:
                         st.warning(t("mandatory_warning"))
                     else:
@@ -550,8 +581,6 @@ if not df.empty:
                         df.at[idx, 'Powertrain'] = ept
                         df.at[idx, 'Price'] = ep
                         df.at[idx, 'Lenght'] = el
-                        df.at[idx, 'Width'] = ew
-                        df.at[idx, 'Height'] = eh
                         df.at[idx, 'Launch Date'] = pd.to_datetime(ed)
                         df.at[idx, 'Type of info'] = es
                         
@@ -561,9 +590,77 @@ if not df.empty:
                             st.rerun()
 
                 if btn_delete:
-                    # Lógica de remoção
                     df = df.drop(index=idx)
                     if save_data(df, token_atual):
                         st.success(t("success_deleted").format(name=en))
                         time.sleep(1.5)
                         st.rerun()
+
+    # ==================== ABA 4: SPEC DISPERSION & ALGORITMO VfM ====================
+    with tab4:
+        st.subheader(t("tab_spec"))
+        
+        # O carregamento deste modelo é isolado da estrutura matriz via st.cache_data
+        df_spec = load_spec_data(token_atual)
+        
+        if not df_spec.empty and 'Dimension' in df_spec.columns:
+            sc1, sc2 = st.columns([1, 2])
+            
+            with sc1:
+                # Slicer de Dimension
+                dim_options = sorted(df_spec['Dimension'].unique())
+                dim_sel = st.selectbox(t("dimension"), dim_options)
+                
+                # Slicer de Faixa de Preço dinâmico para a especificação
+                spec_pmin, spec_pmax = int(df_spec['Price'].min()), int(df_spec['Price'].max())
+                spec_slider_min = min(85000, spec_pmin)
+                spec_slider_max = max(400000, spec_pmax)
+                spec_p_sel = st.slider(t("price") + " (Spec Range)", spec_slider_min, spec_slider_max, (85000, 400000), step=1000)
+                
+            # Filtro Lógico Isolado
+            df_spec_filtered = df_spec[(df_spec['Dimension'] == dim_sel) & 
+                                       (df_spec['Price'] >= spec_p_sel[0]) & 
+                                       (df_spec['Price'] <= spec_p_sel[1])].copy()
+            
+            with sc2:
+                # KPI: Installation Ratio
+                tiv_s = df_spec_filtered[df_spec_filtered['Value'] == 'S']['TIV'].sum()
+                tiv_total = df_spec_filtered['TIV'].sum()
+                ratio = (tiv_s / tiv_total * 100) if tiv_total > 0 else 0
+                st.metric(t("installation_ratio"), f"{ratio:.1f}%")
+                
+            # Visualização Scatter Plot
+            fig_spec = px.scatter(df_spec_filtered, x='Price', y='TIV', color='Value', 
+                                  color_discrete_map={'S': '#2E7D32', 'N': '#D32F2F'},
+                                  hover_data=['Dimensions_Key', 'Price', 'TIV'])
+            
+            fig_spec.update_layout(template="plotly_white", height=600)
+            st.plotly_chart(fig_spec, use_container_width=True)
+            
+            # --- ALGORITMO PREDITIVO VALUE FOR MONEY ---
+            st.divider()
+            
+            df_s = df_spec_filtered[df_spec_filtered['Value'] == 'S'].dropna(subset=['Price', 'TIV'])
+            opt_price, method = 0, "Aguardando dados estruturados"
+            
+            if len(df_s) > 2:
+                # Otimização Quadrática (Parábola)
+                coeffs = np.polyfit(df_s['Price'], df_s['TIV'], 2)
+                a, b, c = coeffs
+                
+                # Encontrando o vértice (Máximo) se a for negativo
+                if a < 0:
+                    opt_price = -b / (2 * a)
+                    # Limita a predição aos máximos e mínimos conhecidos para não sugerir outliers extremos
+                    opt_price = max(min(opt_price, df_s['Price'].max()), df_s['Price'].min())
+                    method = "Otimização Quadrática (Max. Elasticity Curve)"
+                else:
+                    # Método de Clusterização de Faixa (Fallback)
+                    df_s['Price_Bin'] = pd.cut(df_s['Price'], bins=5)
+                    best_bin = df_s.groupby('Price_Bin')['TIV'].mean().idxmax()
+                    opt_price = best_bin.mid
+                    method = "Clusterização (Máxima Média Histórica)"
+                    
+            st.success(f"**{t('optimal_price')}**: R$ {opt_price:,.0f} | **{t('opt_method')}**: {method}")
+        else:
+            st.info("🔄 Os dados cruzados de Fipe, Dimension_List e Price_Policy não foram encontrados. Certifique-se de preencher as abas no Excel.")
