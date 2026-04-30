@@ -676,33 +676,39 @@ if not df.empty:
             fig_spec.update_layout(template="plotly_white", height=600)
             st.plotly_chart(fig_spec, use_container_width=True)
             
-            # --- ALGORITMO PREDITIVO VALUE FOR MONEY ---
+# --- ALGORITMO PREDITIVO VALUE FOR MONEY ---
             st.divider()
             
             df_s = df_spec_filtered[df_spec_filtered['Value'] == 'S'].dropna(subset=['Price', 'TIV']).copy()
             opt_price, method = 0, "Aguardando dados estruturados"
             
             if len(df_s) > 2:
-                # 1. Força a extração como array de floats nativos (Isso resolve o AttributeError)
-                x = pd.to_numeric(df_s['Price'], errors='coerce').fillna(0).astype(float).values
-                y = pd.to_numeric(df_s['TIV'], errors='coerce').fillna(0).astype(float).values
+                # 1. Tratamento 100% Pandas para evitar conflito de tipos (ExtensionArrays) com o Numpy
+                df_s['Price_Clean'] = pd.to_numeric(df_s['Price'], errors='coerce').fillna(0.0)
+                df_s['TIV_Clean'] = pd.to_numeric(df_s['TIV'], errors='coerce').fillna(0.0)
                 
-                # 2. Garante que exista variação de preço para conseguir desenhar a parábola
-                if len(np.unique(x)) > 1:
+                # Extrai os vetores puramente como Numpy floats (Garante compatibilidade absoluta em qualquer nuvem)
+                x = df_s['Price_Clean'].to_numpy(dtype=float)
+                y = df_s['TIV_Clean'].to_numpy(dtype=float)
+                
+                # 2. Validação usando método nativo do Pandas (.nunique()) em vez de np.unique
+                if df_s['Price_Clean'].nunique() > 1:
                     coeffs = np.polyfit(x, y, 2)
                     a, b, c = coeffs
                     
                     if a < 0:
                         opt_price = -b / (2 * a)
+                        # Impede que o modelo sugira um preço fora da realidade analisada
                         opt_price = max(min(opt_price, x.max()), x.min())
                         method = "Otimização Quadrática (Max. Elasticity Curve)"
                     else:
-                        df_s['Price_Bin'] = pd.cut(x, bins=5)
-                        best_bin = df_s.groupby('Price_Bin')['TIV'].mean().idxmax()
+                        # Fallback de Clusterização inteligente
+                        df_s['Price_Bin'] = pd.cut(df_s['Price_Clean'], bins=5)
+                        best_bin = df_s.groupby('Price_Bin')['TIV_Clean'].mean().idxmax()
                         opt_price = best_bin.mid
                         method = "Clusterização (Máxima Média Histórica)"
                 else:
-                    opt_price = x[0]
+                    opt_price = x[0] if len(x) > 0 else 0
                     method = "Preço Único de Mercado"
                     
             st.success(f"**{t('optimal_price')}**: R$ {opt_price:,.0f} | **{t('opt_method')}**: {method}")
