@@ -270,9 +270,17 @@ def load_spec_data(token):
             # Tratamento de regras: Vazio/NaN -> N, Resto segue S ou N
             dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({'': 'N', ' ': 'N'})
 
-            # Cruzamento de Dados (JOINs)
-            merged = dim_melt.merge(df_keys, left_on='Dimensions_Key', right_on='Dimensions_Key', how='left')
-            merged = merged.merge(fipe_ytd, on='MODELO_VERSAO', how='left')
+            # --- CORREÇÃO DO CRUZAMENTO DE DADOS (JOINs) ---
+            # 1. Adiciona a chave Fipe_Key aos modelos da Dimension_List
+            merged = dim_melt.merge(df_keys, on='Dimensions_Key', how='left')
+            
+            # 2. Cruza o volume Fipe usando a Fipe_Key "traduzida"
+            if 'Fipe_Key' in merged.columns:
+                merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
+            else:
+                merged = merged.merge(fipe_ytd, on='MODELO_VERSAO', how='left')
+                
+            # 3. Cruza os preços
             merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
 
             merged['TIV'] = pd.to_numeric(merged['TIV'], errors='coerce').fillna(0)
@@ -280,26 +288,11 @@ def load_spec_data(token):
 
             return merged
         except Exception as e:
-            # Caso as abas não existam ainda, silenciar o erro para não quebrar a aplicação raiz
+            # Em caso de qualquer erro de nome de coluna, exibiremos o erro na tela para facilitar o debug
+            st.error(f"Erro no processamento da planilha: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
-
-def save_data(df, token):
-    output = BytesIO()
-    df_save = df.copy()
-    cols = [c for c in df_save.columns if c not in ['Month_Year', 'Quarter', 'Label']]
-    df_to_xlsx = df_save[cols]
-    df_to_xlsx['Launch Date'] = pd.to_datetime(df_to_xlsx['Launch Date']).dt.strftime('%d/%m/%Y')
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_to_xlsx.to_excel(writer, sheet_name="Launches", index=False)
-    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
-    resp = requests.put(url, headers=headers, data=output.getvalue())
-    if resp.status_code in [200, 201]:
-        st.cache_data.clear()
-        return True
-    return False
-
+    
 # ==========================================
 # 4. FUNÇÃO DE RADAR RSS (Com "Others")
 # ==========================================
