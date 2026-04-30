@@ -261,27 +261,25 @@ def load_spec_data(token):
             for df_temp in [df_keys, df_fipe, df_dim, df_price]:
                 df_temp.columns = df_temp.columns.astype(str).str.strip()
 
-            # 2. Padroniza Nomes das Colunas Chaves (Fuzzy Matcher)
+            # 2. Padroniza Nomes das Colunas Chaves (Ajustado para Base_MI_2)
             def padronizar_coluna(df, nomes_aceitos, nome_final):
                 for col in df.columns:
                     if col.lower() in [n.lower() for n in nomes_aceitos]:
                         df.rename(columns={col: nome_final}, inplace=True)
                         break
 
-            padronizar_coluna(df_keys, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
-            padronizar_coluna(df_keys, ['Fipe_Key', 'Fipe Key', 'Modelo_Versao', 'Fipe', 'Modelo Fipe'], 'Fipe_Key')
-            padronizar_coluna(df_price, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
-            padronizar_coluna(df_price, ['Price', 'Preço', 'Preco', 'Valor'], 'Price')
-            padronizar_coluna(df_fipe, ['Modelo_Versao', 'Modelo Versao', 'Fipe_Key', 'Modelo', 'Veiculo', 'Name'], 'MODELO_VERSAO')
+            # Mapeamento estrito para as nomenclaturas reais da sua planilha
+            padronizar_coluna(df_keys, ['Comercial', 'Control', 'Dimensions_Key', 'Dimension_Key', 'Veiculo', 'Carro'], 'Dimensions_Key')
+            padronizar_coluna(df_keys, ['FIPE', 'Fipe_Key', 'Fipe Key', 'Modelo_Versao'], 'Fipe_Key')
+            padronizar_coluna(df_price, ['Control', 'Comercial', 'Dimensions_Key', 'Dimension_Key'], 'Dimensions_Key')
+            padronizar_coluna(df_price, ['MSRP', 'Price', 'Preço', 'Preco', 'Valor'], 'Price')
+            padronizar_coluna(df_fipe, ['Modelo_Versao', 'Modelo Versao', 'Fipe_Key', 'Modelo'], 'MODELO_VERSAO')
             padronizar_coluna(df_fipe, ['TIV', 'Volume', 'Vendas', 'Emplacamentos'], 'TIV')
 
             if 'Dimensions_Key' not in df_keys.columns:
                 raise KeyError(f"Aba 'Keys' não possui coluna válida. Colunas encontradas: {list(df_keys.columns)}")
 
-            # ==========================================
-            # 3. A MÁGICA: LIMPEZA ABSOLUTA DE CHAVES
-            # Remove '.0' de números (ex: 208.0 vira 208), espaços laterais e força Maiúsculas
-            # ==========================================
+            # 3. Limpeza Absoluta de Chaves
             def clean_key(series):
                 return series.astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.upper()
 
@@ -312,7 +310,6 @@ def load_spec_data(token):
             # ==========================================
             # O CROSSCHECK (JOIN) SEGURO
             # ==========================================
-            # Remove duplicatas da aba de De/Para para evitar quebra de Join
             df_keys_clean = df_keys[['Dimensions_Key', 'Fipe_Key']].dropna().drop_duplicates('Dimensions_Key')
             merged = dim_melt.merge(df_keys_clean, on='Dimensions_Key', how='left')
             
@@ -322,13 +319,11 @@ def load_spec_data(token):
                 merged = merged.merge(fipe_ytd, left_on='Dimensions_Key', right_on='MODELO_VERSAO', how='left')
                 
             if 'Dimensions_Key' in df_price.columns:
-                # Remove duplicatas da aba de Preços
                 df_price_clean = df_price[['Dimensions_Key', 'Price']].dropna().drop_duplicates('Dimensions_Key')
                 merged = merged.merge(df_price_clean, on='Dimensions_Key', how='left')
             else:
                 merged['Price'] = 0
 
-            # Preenchimento final de zeros onde o Join não encontrou os carros
             if 'TIV' in merged.columns: merged['TIV'] = merged['TIV'].fillna(0)
             if 'Price' in merged.columns: merged['Price'] = merged['Price'].fillna(0)
 
