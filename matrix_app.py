@@ -333,6 +333,22 @@ def load_spec_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
+def save_data(df, token):
+    output = BytesIO()
+    df_save = df.copy()
+    cols = [c for c in df_save.columns if c not in ['Month_Year', 'Quarter', 'Label']]
+    df_to_xlsx = df_save[cols]
+    df_to_xlsx['Launch Date'] = pd.to_datetime(df_to_xlsx['Launch Date']).dt.strftime('%d/%m/%Y')
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_to_xlsx.to_excel(writer, sheet_name="Launches", index=False)
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+    resp = requests.put(url, headers=headers, data=output.getvalue())
+    if resp.status_code in [200, 201]:
+        st.cache_data.clear()
+        return True
+    return False
+
 # ==========================================
 # 4. FUNÇÃO DE RADAR RSS
 # ==========================================
@@ -660,24 +676,34 @@ if not df.empty:
             fig_spec.update_layout(template="plotly_white", height=600)
             st.plotly_chart(fig_spec, use_container_width=True)
             
+            # --- ALGORITMO PREDITIVO VALUE FOR MONEY ---
             st.divider()
             
-            df_s = df_spec_filtered[df_spec_filtered['Value'] == 'S'].dropna(subset=['Price', 'TIV'])
+            df_s = df_spec_filtered[df_spec_filtered['Value'] == 'S'].dropna(subset=['Price', 'TIV']).copy()
             opt_price, method = 0, "Aguardando dados estruturados"
             
             if len(df_s) > 2:
-                coeffs = np.polyfit(df_s['Price'], df_s['TIV'], 2)
-                a, b, c = coeffs
+                # 1. Força a extração como array de floats nativos (Isso resolve o AttributeError)
+                x = pd.to_numeric(df_s['Price'], errors='coerce').fillna(0).astype(float).values
+                y = pd.to_numeric(df_s['TIV'], errors='coerce').fillna(0).astype(float).values
                 
-                if a < 0:
-                    opt_price = -b / (2 * a)
-                    opt_price = max(min(opt_price, df_s['Price'].max()), df_s['Price'].min())
-                    method = "Otimização Quadrática (Max. Elasticity Curve)"
+                # 2. Garante que exista variação de preço para conseguir desenhar a parábola
+                if len(np.unique(x)) > 1:
+                    coeffs = np.polyfit(x, y, 2)
+                    a, b, c = coeffs
+                    
+                    if a < 0:
+                        opt_price = -b / (2 * a)
+                        opt_price = max(min(opt_price, x.max()), x.min())
+                        method = "Otimização Quadrática (Max. Elasticity Curve)"
+                    else:
+                        df_s['Price_Bin'] = pd.cut(x, bins=5)
+                        best_bin = df_s.groupby('Price_Bin')['TIV'].mean().idxmax()
+                        opt_price = best_bin.mid
+                        method = "Clusterização (Máxima Média Histórica)"
                 else:
-                    df_s['Price_Bin'] = pd.cut(df_s['Price'], bins=5)
-                    best_bin = df_s.groupby('Price_Bin')['TIV'].mean().idxmax()
-                    opt_price = best_bin.mid
-                    method = "Clusterização (Máxima Média Histórica)"
+                    opt_price = x[0]
+                    method = "Preço Único de Mercado"
                     
             st.success(f"**{t('optimal_price')}**: R$ {opt_price:,.0f} | **{t('opt_method')}**: {method}")
         else:
