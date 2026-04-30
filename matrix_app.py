@@ -263,19 +263,28 @@ def load_spec_data(token):
                 df_temp.columns = df_temp.columns.astype(str).str.strip()
 
             # 2. Tratamento e Agrupamento da Fipe (Eixo Y: Volume)
-            # Garantir uppercase para que o match não falhe por causa de maiúsculas/minúsculas
-            df_fipe['MODELO_VERSAO'] = df_fipe.get('MODELO_VERSAO', df_fipe.iloc[:,0]).astype(str).str.strip().str.upper()
-            df_fipe['TIV'] = pd.to_numeric(df_fipe.get('TIV', 0), errors='coerce').fillna(0)
+            if 'MODELO_VERSAO' not in df_fipe.columns:
+                df_fipe['MODELO_VERSAO'] = df_fipe.iloc[:,0]
+            df_fipe['MODELO_VERSAO'] = df_fipe['MODELO_VERSAO'].astype(str).str.strip().str.upper()
+            
+            # Correção do erro 'int object has no attribute fillna'
+            if 'TIV' not in df_fipe.columns:
+                df_fipe['TIV'] = 0
+            df_fipe['TIV'] = pd.to_numeric(df_fipe['TIV'], errors='coerce').fillna(0)
+            
             fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
 
             # 3. Tratamento de Preços (Eixo X: Price)
             if 'Dimensions_Key' not in df_price.columns:
                 df_price.rename(columns={df_price.columns[0]: 'Dimensions_Key'}, inplace=True)
             df_price['Dimensions_Key'] = df_price['Dimensions_Key'].astype(str).str.strip().str.upper()
-            df_price['Price'] = pd.to_numeric(df_price.get('Price', 0), errors='coerce').fillna(0)
+            
+            # Correção do erro 'int object has no attribute fillna'
+            if 'Price' not in df_price.columns:
+                df_price['Price'] = 0
+            df_price['Price'] = pd.to_numeric(df_price['Price'], errors='coerce').fillna(0)
 
             # 4. Tratamento do Tradutor (Aba Keys -> Crosscheck Fipe vs Dimensions)
-            # Garante a nomenclatura correta caso tenha vindo diferente
             if 'Fipe_Key' not in df_keys.columns:
                 for c in df_keys.columns:
                     if 'FIPE' in c.upper(): df_keys.rename(columns={c: 'Fipe_Key'}, inplace=True)
@@ -296,19 +305,15 @@ def load_spec_data(token):
             # ==========================================
             # O CROSSCHECK (JOIN) OBRIGATÓRIO
             # ==========================================
-            
-            # Passo A: Pega a matriz de especificações e busca qual é a chave Fipe correspondente na aba "Keys"
             merged = dim_melt.merge(df_keys[['Dimensions_Key', 'Fipe_Key']], on='Dimensions_Key', how='left')
-            
-            # Passo B: Usa a chave traduzida 'Fipe_Key' para buscar o volume 'TIV' na tabela agrupada 'fipe_ytd'
             merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
-            
-            # Passo C: Usa a chave original 'Dimensions_Key' para buscar o Preço na política de preços
             merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
 
-            # Tratamento final de possíveis Nulos (carros que não constavam na Fipe ficam com 0)
-            merged['TIV'] = merged['TIV'].fillna(0)
-            merged['Price'] = merged['Price'].fillna(0)
+            # Tratamento final de possíveis Nulos na tabela unida
+            if 'TIV' in merged.columns:
+                merged['TIV'] = merged['TIV'].fillna(0)
+            if 'Price' in merged.columns:
+                merged['Price'] = merged['Price'].fillna(0)
 
             return merged
         except Exception as e:
