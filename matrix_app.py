@@ -20,7 +20,7 @@ st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layo
 
 CACHE_FILE = "token_cache.bin"
 
-# Dicionário de Internacionalização (i18n) - Atualizado
+# Dicionário de Internacionalização (i18n)
 translations = {
     "EN": {
         "login_title": "🔒 Login - Market Intelligence",
@@ -134,7 +134,6 @@ translations = {
     }
 }
 
-# Toggle Switch de Idioma
 is_chinese = st.sidebar.toggle("🌐 中文 / English", value=False)
 st.session_state.lang = "ZH" if is_chinese else "EN"
 
@@ -243,7 +242,7 @@ def load_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) ---
+# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) COM BLINDAGEM DE COLUNAS ---
 @st.cache_data(ttl=60)
 def load_spec_data(token):
     url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
@@ -253,48 +252,74 @@ def load_spec_data(token):
         try:
             excel_data = BytesIO(resp.content)
             
-            # Carregar Abas do Escopo
             df_keys = pd.read_excel(excel_data, sheet_name='Keys')
             df_fipe = pd.read_excel(excel_data, sheet_name='Fipe')
             df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
             df_price = pd.read_excel(excel_data, sheet_name='Price_Policy')
 
-            # Agrupar Volume TIV (Year-to-Date) por MODELO_VERSAO na base Fipe
+            # 1. Blindagem: Remove espaços ocultos nos nomes das colunas de todos os dataframes
+            for df_temp in [df_keys, df_fipe, df_dim, df_price]:
+                df_temp.columns = df_temp.columns.str.strip()
+
+            # 2. Padronização de Colunas de Chave
+            if 'Dimension_Key' in df_keys.columns:
+                df_keys.rename(columns={'Dimension_Key': 'Dimensions_Key'}, inplace=True)
+            if 'Dimension_Key' in df_price.columns:
+                df_price.rename(columns={'Dimension_Key': 'Dimensions_Key'}, inplace=True)
+            if 'Modelo' in df_keys.columns and 'Dimensions_Key' not in df_keys.columns:
+                df_keys.rename(columns={'Modelo': 'Dimensions_Key'}, inplace=True)
+
+            # Agrupar Volume TIV (Year-to-Date)
             fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
 
             # Melt na aba de Dimensões
-            dim_col = df_dim.columns[0] # Assume primeira coluna como o nome da dimensão
+            dim_col = df_dim.columns[0]
             dim_melt = df_dim.melt(id_vars=[dim_col], var_name='Dimensions_Key', value_name='Value')
             dim_melt.rename(columns={dim_col: 'Dimension'}, inplace=True)
             
-            # Tratamento de regras: Vazio/NaN -> N, Resto segue S ou N
             dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({'': 'N', ' ': 'N'})
 
-            # --- CORREÇÃO DO CRUZAMENTO DE DADOS (JOINs) ---
-            # 1. Adiciona a chave Fipe_Key aos modelos da Dimension_List
+            # Cruzamentos Seguros
             merged = dim_melt.merge(df_keys, on='Dimensions_Key', how='left')
             
-            # 2. Cruza o volume Fipe usando a Fipe_Key "traduzida"
             if 'Fipe_Key' in merged.columns:
                 merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
             else:
-                merged = merged.merge(fipe_ytd, on='MODELO_VERSAO', how='left')
+                # Fallback caso a coluna Fipe_Key não exista
+                merged = merged.merge(fipe_ytd, left_on='Dimensions_Key', right_on='MODELO_VERSAO', how='left')
                 
-            # 3. Cruza os preços
-            merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
+            if 'Dimensions_Key' in df_price.columns:
+                merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
+            else:
+                merged['Price'] = 0
 
-            merged['TIV'] = pd.to_numeric(merged['TIV'], errors='coerce').fillna(0)
-            merged['Price'] = pd.to_numeric(merged['Price'], errors='coerce').fillna(0)
+            merged['TIV'] = pd.to_numeric(merged.get('TIV', 0), errors='coerce').fillna(0)
+            merged['Price'] = pd.to_numeric(merged.get('Price', 0), errors='coerce').fillna(0)
 
             return merged
         except Exception as e:
-            # Em caso de qualquer erro de nome de coluna, exibiremos o erro na tela para facilitar o debug
-            st.error(f"Erro no processamento da planilha: {e}")
+            st.error(f"Erro no processamento da planilha: {e}. Verifique as abas Keys, Fipe e Price_Policy.")
             return pd.DataFrame()
     return pd.DataFrame()
-    
+
+def save_data(df, token):
+    output = BytesIO()
+    df_save = df.copy()
+    cols = [c for c in df_save.columns if c not in ['Month_Year', 'Quarter', 'Label']]
+    df_to_xlsx = df_save[cols]
+    df_to_xlsx['Launch Date'] = pd.to_datetime(df_to_xlsx['Launch Date']).dt.strftime('%d/%m/%Y')
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_to_xlsx.to_excel(writer, sheet_name="Launches", index=False)
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+    resp = requests.put(url, headers=headers, data=output.getvalue())
+    if resp.status_code in [200, 201]:
+        st.cache_data.clear()
+        return True
+    return False
+
 # ==========================================
-# 4. FUNÇÃO DE RADAR RSS (Com "Others")
+# 4. FUNÇÃO DE RADAR RSS
 # ==========================================
 @st.cache_data(ttl=1800) 
 def fetch_automotive_news():
@@ -388,13 +413,11 @@ if not df.empty:
 
     st.title(t("app_title"))
     
-    # Novas Abas consolidadas com isolamento do Spec Dispersion
     tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit"), t("tab_spec")])
 
     # ==================== ABA 1: MATRIZ ====================
     with tab1:
         c1, c2 = st.columns(2)
-        y_axis_label = 'Month_Year' if view_mode == t("month") else 'Quarter'
         
         e_x = c1.selectbox(t("x_axis"), ['Lenght', 'Price', 'Launch Date'], index=2) 
         e_y = c2.selectbox(t("y_axis"), ['Price', 'Lenght'], index=0)
@@ -455,7 +478,7 @@ if not df.empty:
 
         st.plotly_chart(fig, use_container_width=True)
 
-    # ==================== ABA 2: NEWS RADAR & CADASTRO IN-PAGE ====================
+    # ==================== ABA 2: NEWS RADAR & CADASTRO ====================
     with tab2:
         st.subheader(t("tab_radar"))
         st.markdown(f"*{t('news_desc')}*")
@@ -525,9 +548,7 @@ if not df.empty:
                         if save_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True), token_atual):
                             if 'fast_brand' in st.session_state: del st.session_state['fast_brand']
                             if 'fast_title' in st.session_state: del st.session_state['fast_title']
-                            
                             st.session_state['show_news'] = False 
-                            
                             st.success(t("success_added").format(name=nn))
                             time.sleep(2)
                             st.rerun()
@@ -593,36 +614,30 @@ if not df.empty:
     with tab4:
         st.subheader(t("tab_spec"))
         
-        # O carregamento deste modelo é isolado da estrutura matriz via st.cache_data
         df_spec = load_spec_data(token_atual)
         
         if not df_spec.empty and 'Dimension' in df_spec.columns:
             sc1, sc2 = st.columns([1, 2])
             
             with sc1:
-                # Slicer de Dimension
                 dim_options = sorted(df_spec['Dimension'].unique())
                 dim_sel = st.selectbox(t("dimension"), dim_options)
                 
-                # Slicer de Faixa de Preço dinâmico para a especificação
                 spec_pmin, spec_pmax = int(df_spec['Price'].min()), int(df_spec['Price'].max())
                 spec_slider_min = min(85000, spec_pmin)
                 spec_slider_max = max(400000, spec_pmax)
                 spec_p_sel = st.slider(t("price") + " (Spec Range)", spec_slider_min, spec_slider_max, (85000, 400000), step=1000)
                 
-            # Filtro Lógico Isolado
             df_spec_filtered = df_spec[(df_spec['Dimension'] == dim_sel) & 
                                        (df_spec['Price'] >= spec_p_sel[0]) & 
                                        (df_spec['Price'] <= spec_p_sel[1])].copy()
             
             with sc2:
-                # KPI: Installation Ratio
                 tiv_s = df_spec_filtered[df_spec_filtered['Value'] == 'S']['TIV'].sum()
                 tiv_total = df_spec_filtered['TIV'].sum()
                 ratio = (tiv_s / tiv_total * 100) if tiv_total > 0 else 0
                 st.metric(t("installation_ratio"), f"{ratio:.1f}%")
                 
-            # Visualização Scatter Plot
             fig_spec = px.scatter(df_spec_filtered, x='Price', y='TIV', color='Value', 
                                   color_discrete_map={'S': '#2E7D32', 'N': '#D32F2F'},
                                   hover_data=['Dimensions_Key', 'Price', 'TIV'])
@@ -630,25 +645,20 @@ if not df.empty:
             fig_spec.update_layout(template="plotly_white", height=600)
             st.plotly_chart(fig_spec, use_container_width=True)
             
-            # --- ALGORITMO PREDITIVO VALUE FOR MONEY ---
             st.divider()
             
             df_s = df_spec_filtered[df_spec_filtered['Value'] == 'S'].dropna(subset=['Price', 'TIV'])
             opt_price, method = 0, "Aguardando dados estruturados"
             
             if len(df_s) > 2:
-                # Otimização Quadrática (Parábola)
                 coeffs = np.polyfit(df_s['Price'], df_s['TIV'], 2)
                 a, b, c = coeffs
                 
-                # Encontrando o vértice (Máximo) se a for negativo
                 if a < 0:
                     opt_price = -b / (2 * a)
-                    # Limita a predição aos máximos e mínimos conhecidos para não sugerir outliers extremos
                     opt_price = max(min(opt_price, df_s['Price'].max()), df_s['Price'].min())
                     method = "Otimização Quadrática (Max. Elasticity Curve)"
                 else:
-                    # Método de Clusterização de Faixa (Fallback)
                     df_s['Price_Bin'] = pd.cut(df_s['Price'], bins=5)
                     best_bin = df_s.groupby('Price_Bin')['TIV'].mean().idxmax()
                     opt_price = best_bin.mid
@@ -656,4 +666,4 @@ if not df.empty:
                     
             st.success(f"**{t('optimal_price')}**: R$ {opt_price:,.0f} | **{t('opt_method')}**: {method}")
         else:
-            st.info("🔄 Os dados cruzados de Fipe, Dimension_List e Price_Policy não foram encontrados. Certifique-se de preencher as abas no Excel.")
+            st.info("🔄 Os dados cruzados não foram encontrados. Certifique-se de preencher corretamente as abas no Excel.")
