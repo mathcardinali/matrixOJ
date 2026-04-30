@@ -242,7 +242,7 @@ def load_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) ---
+# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) COM BLINDAGEM TOTAL ---
 @st.cache_data(ttl=60)
 def load_spec_data(token):
     url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
@@ -252,7 +252,6 @@ def load_spec_data(token):
         try:
             excel_data = BytesIO(resp.content)
             
-            # Carrega as abas do arquivo
             df_keys = pd.read_excel(excel_data, sheet_name='Keys')
             df_fipe = pd.read_excel(excel_data, sheet_name='Fipe')
             df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
@@ -262,62 +261,80 @@ def load_spec_data(token):
             for df_temp in [df_keys, df_fipe, df_dim, df_price]:
                 df_temp.columns = df_temp.columns.astype(str).str.strip()
 
-            # 2. Tratamento e Agrupamento da Fipe (Eixo Y: Volume)
-            if 'MODELO_VERSAO' not in df_fipe.columns:
-                df_fipe['MODELO_VERSAO'] = df_fipe.iloc[:,0]
-            df_fipe['MODELO_VERSAO'] = df_fipe['MODELO_VERSAO'].astype(str).str.strip().str.upper()
+            # 2. Padroniza Nomes das Colunas Chaves (Fuzzy Matcher)
+            def padronizar_coluna(df, nomes_aceitos, nome_final):
+                for col in df.columns:
+                    if col.lower() in [n.lower() for n in nomes_aceitos]:
+                        df.rename(columns={col: nome_final}, inplace=True)
+                        break
+
+            padronizar_coluna(df_keys, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
+            padronizar_coluna(df_keys, ['Fipe_Key', 'Fipe Key', 'Modelo_Versao', 'Fipe', 'Modelo Fipe'], 'Fipe_Key')
+            padronizar_coluna(df_price, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
+            padronizar_coluna(df_price, ['Price', 'Preço', 'Preco', 'Valor'], 'Price')
+            padronizar_coluna(df_fipe, ['Modelo_Versao', 'Modelo Versao', 'Fipe_Key', 'Modelo', 'Veiculo', 'Name'], 'MODELO_VERSAO')
+            padronizar_coluna(df_fipe, ['TIV', 'Volume', 'Vendas', 'Emplacamentos'], 'TIV')
+
+            if 'Dimensions_Key' not in df_keys.columns:
+                raise KeyError(f"Aba 'Keys' não possui coluna válida. Colunas encontradas: {list(df_keys.columns)}")
+
+            # ==========================================
+            # 3. A MÁGICA: LIMPEZA ABSOLUTA DE CHAVES
+            # Remove '.0' de números (ex: 208.0 vira 208), espaços laterais e força Maiúsculas
+            # ==========================================
+            def clean_key(series):
+                return series.astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.upper()
+
+            df_keys['Dimensions_Key'] = clean_key(df_keys['Dimensions_Key'])
+            if 'Fipe_Key' in df_keys.columns:
+                df_keys['Fipe_Key'] = clean_key(df_keys['Fipe_Key'])
             
-            # Correção do erro 'int object has no attribute fillna'
-            if 'TIV' not in df_fipe.columns:
-                df_fipe['TIV'] = 0
+            if 'Dimensions_Key' in df_price.columns:
+                df_price['Dimensions_Key'] = clean_key(df_price['Dimensions_Key'])
+                
+            df_fipe['MODELO_VERSAO'] = clean_key(df_fipe['MODELO_VERSAO'])
+
+            # 4. Tratamento de Fipe e Price
+            if 'TIV' not in df_fipe.columns: df_fipe['TIV'] = 0
             df_fipe['TIV'] = pd.to_numeric(df_fipe['TIV'], errors='coerce').fillna(0)
-            
             fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
 
-            # 3. Tratamento de Preços (Eixo X: Price)
-            if 'Dimensions_Key' not in df_price.columns:
-                df_price.rename(columns={df_price.columns[0]: 'Dimensions_Key'}, inplace=True)
-            df_price['Dimensions_Key'] = df_price['Dimensions_Key'].astype(str).str.strip().str.upper()
-            
-            # Correção do erro 'int object has no attribute fillna'
-            if 'Price' not in df_price.columns:
-                df_price['Price'] = 0
+            if 'Price' not in df_price.columns: df_price['Price'] = 0
             df_price['Price'] = pd.to_numeric(df_price['Price'], errors='coerce').fillna(0)
-
-            # 4. Tratamento do Tradutor (Aba Keys -> Crosscheck Fipe vs Dimensions)
-            if 'Fipe_Key' not in df_keys.columns:
-                for c in df_keys.columns:
-                    if 'FIPE' in c.upper(): df_keys.rename(columns={c: 'Fipe_Key'}, inplace=True)
-            if 'Dimensions_Key' not in df_keys.columns:
-                for c in df_keys.columns:
-                    if 'DIMENSION' in c.upper() or 'MODELO' in c.upper(): df_keys.rename(columns={c: 'Dimensions_Key'}, inplace=True)
-            
-            df_keys['Dimensions_Key'] = df_keys['Dimensions_Key'].astype(str).str.strip().str.upper()
-            df_keys['Fipe_Key'] = df_keys['Fipe_Key'].astype(str).str.strip().str.upper()
 
             # 5. Tratamento de Especificações (Dimension_List)
             dim_col = df_dim.columns[0] 
             dim_melt = df_dim.melt(id_vars=[dim_col], var_name='Dimensions_Key', value_name='Value')
             dim_melt.rename(columns={dim_col: 'Dimension'}, inplace=True)
             dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({'': 'N', ' ': 'N'})
-            dim_melt['Dimensions_Key'] = dim_melt['Dimensions_Key'].astype(str).str.strip().str.upper()
+            dim_melt['Dimensions_Key'] = clean_key(dim_melt['Dimensions_Key'])
 
             # ==========================================
-            # O CROSSCHECK (JOIN) OBRIGATÓRIO
+            # O CROSSCHECK (JOIN) SEGURO
             # ==========================================
-            merged = dim_melt.merge(df_keys[['Dimensions_Key', 'Fipe_Key']], on='Dimensions_Key', how='left')
-            merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
-            merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
+            # Remove duplicatas da aba de De/Para para evitar quebra de Join
+            df_keys_clean = df_keys[['Dimensions_Key', 'Fipe_Key']].dropna().drop_duplicates('Dimensions_Key')
+            merged = dim_melt.merge(df_keys_clean, on='Dimensions_Key', how='left')
+            
+            if 'Fipe_Key' in merged.columns:
+                merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
+            else:
+                merged = merged.merge(fipe_ytd, left_on='Dimensions_Key', right_on='MODELO_VERSAO', how='left')
+                
+            if 'Dimensions_Key' in df_price.columns:
+                # Remove duplicatas da aba de Preços
+                df_price_clean = df_price[['Dimensions_Key', 'Price']].dropna().drop_duplicates('Dimensions_Key')
+                merged = merged.merge(df_price_clean, on='Dimensions_Key', how='left')
+            else:
+                merged['Price'] = 0
 
-            # Tratamento final de possíveis Nulos na tabela unida
-            if 'TIV' in merged.columns:
-                merged['TIV'] = merged['TIV'].fillna(0)
-            if 'Price' in merged.columns:
-                merged['Price'] = merged['Price'].fillna(0)
+            # Preenchimento final de zeros onde o Join não encontrou os carros
+            if 'TIV' in merged.columns: merged['TIV'] = merged['TIV'].fillna(0)
+            if 'Price' in merged.columns: merged['Price'] = merged['Price'].fillna(0)
 
             return merged
         except Exception as e:
-            st.error(f"⚠️ Erro no Cruzamento de Dados: {e}")
+            st.error(f"⚠️ Erro de Estrutura no Excel: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
