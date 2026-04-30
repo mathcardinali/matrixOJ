@@ -242,7 +242,7 @@ def load_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) COM BLINDAGEM DE COLUNAS ---
+# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) ---
 @st.cache_data(ttl=60)
 def load_spec_data(token):
     url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
@@ -252,70 +252,67 @@ def load_spec_data(token):
         try:
             excel_data = BytesIO(resp.content)
             
+            # Carrega as abas do arquivo
             df_keys = pd.read_excel(excel_data, sheet_name='Keys')
             df_fipe = pd.read_excel(excel_data, sheet_name='Fipe')
             df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
             df_price = pd.read_excel(excel_data, sheet_name='Price_Policy')
 
-            # 1. Blindagem: Remove espaços ocultos no início/fim dos nomes das colunas
+            # 1. Blindagem de espaços nos nomes das colunas
             for df_temp in [df_keys, df_fipe, df_dim, df_price]:
                 df_temp.columns = df_temp.columns.astype(str).str.strip()
 
-            # 2. Função inteligente para encontrar e padronizar as colunas (Fuzzy Matching)
-            def padronizar_coluna(df, nomes_aceitos, nome_final):
-                for col in df.columns:
-                    if col.lower() in [n.lower() for n in nomes_aceitos]:
-                        df.rename(columns={col: nome_final}, inplace=True)
-                        break
-
-            # Padroniza Aba Keys
-            padronizar_coluna(df_keys, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
-            padronizar_coluna(df_keys, ['Fipe_Key', 'Fipe Key', 'Modelo_Versao', 'Fipe', 'Modelo Fipe'], 'Fipe_Key')
-
-            # Padroniza Aba Price Policy
-            padronizar_coluna(df_price, ['Dimensions_Key', 'Dimension_Key', 'Modelo', 'Veiculo', 'Carro', 'Dimension', 'Name'], 'Dimensions_Key')
-            padronizar_coluna(df_price, ['Price', 'Preço', 'Preco', 'Valor'], 'Price')
-
-            # Padroniza Aba Fipe
-            padronizar_coluna(df_fipe, ['Modelo_Versao', 'Modelo Versao', 'Fipe_Key', 'Modelo', 'Veiculo', 'Name'], 'MODELO_VERSAO')
-            padronizar_coluna(df_fipe, ['TIV', 'Volume', 'Vendas', 'Emplacamentos'], 'TIV')
-
-            # Verifica se a chave primária foi encontrada após a tentativa de padronização
-            if 'Dimensions_Key' not in df_keys.columns:
-                raise KeyError(f"Aba 'Keys' não possui uma coluna de ligação válida. Colunas encontradas: {list(df_keys.columns)}")
-
-            # Agrupar Volume TIV (Year-to-Date)
+            # 2. Tratamento e Agrupamento da Fipe (Eixo Y: Volume)
+            # Garantir uppercase para que o match não falhe por causa de maiúsculas/minúsculas
+            df_fipe['MODELO_VERSAO'] = df_fipe.get('MODELO_VERSAO', df_fipe.iloc[:,0]).astype(str).str.strip().str.upper()
+            df_fipe['TIV'] = pd.to_numeric(df_fipe.get('TIV', 0), errors='coerce').fillna(0)
             fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
 
-            # Melt na aba de Dimensões
-            dim_col = df_dim.columns[0] # Pega dinamicamente a primeira coluna
+            # 3. Tratamento de Preços (Eixo X: Price)
+            if 'Dimensions_Key' not in df_price.columns:
+                df_price.rename(columns={df_price.columns[0]: 'Dimensions_Key'}, inplace=True)
+            df_price['Dimensions_Key'] = df_price['Dimensions_Key'].astype(str).str.strip().str.upper()
+            df_price['Price'] = pd.to_numeric(df_price.get('Price', 0), errors='coerce').fillna(0)
+
+            # 4. Tratamento do Tradutor (Aba Keys -> Crosscheck Fipe vs Dimensions)
+            # Garante a nomenclatura correta caso tenha vindo diferente
+            if 'Fipe_Key' not in df_keys.columns:
+                for c in df_keys.columns:
+                    if 'FIPE' in c.upper(): df_keys.rename(columns={c: 'Fipe_Key'}, inplace=True)
+            if 'Dimensions_Key' not in df_keys.columns:
+                for c in df_keys.columns:
+                    if 'DIMENSION' in c.upper() or 'MODELO' in c.upper(): df_keys.rename(columns={c: 'Dimensions_Key'}, inplace=True)
+            
+            df_keys['Dimensions_Key'] = df_keys['Dimensions_Key'].astype(str).str.strip().str.upper()
+            df_keys['Fipe_Key'] = df_keys['Fipe_Key'].astype(str).str.strip().str.upper()
+
+            # 5. Tratamento de Especificações (Dimension_List)
+            dim_col = df_dim.columns[0] 
             dim_melt = df_dim.melt(id_vars=[dim_col], var_name='Dimensions_Key', value_name='Value')
             dim_melt.rename(columns={dim_col: 'Dimension'}, inplace=True)
-            
             dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({'': 'N', ' ': 'N'})
+            dim_melt['Dimensions_Key'] = dim_melt['Dimensions_Key'].astype(str).str.strip().str.upper()
 
-            # Cruzamentos Seguros
-            merged = dim_melt.merge(df_keys, on='Dimensions_Key', how='left')
+            # ==========================================
+            # O CROSSCHECK (JOIN) OBRIGATÓRIO
+            # ==========================================
             
-            if 'Fipe_Key' in merged.columns:
-                merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
-            else:
-                # Fallback: Se não tem coluna De/Para Fipe, tenta cruzar direto pelo nome
-                merged = merged.merge(fipe_ytd, left_on='Dimensions_Key', right_on='MODELO_VERSAO', how='left')
-                
-            if 'Dimensions_Key' in df_price.columns:
-                merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
-            else:
-                merged['Price'] = 0
+            # Passo A: Pega a matriz de especificações e busca qual é a chave Fipe correspondente na aba "Keys"
+            merged = dim_melt.merge(df_keys[['Dimensions_Key', 'Fipe_Key']], on='Dimensions_Key', how='left')
+            
+            # Passo B: Usa a chave traduzida 'Fipe_Key' para buscar o volume 'TIV' na tabela agrupada 'fipe_ytd'
+            merged = merged.merge(fipe_ytd, left_on='Fipe_Key', right_on='MODELO_VERSAO', how='left')
+            
+            # Passo C: Usa a chave original 'Dimensions_Key' para buscar o Preço na política de preços
+            merged = merged.merge(df_price[['Dimensions_Key', 'Price']], on='Dimensions_Key', how='left')
 
-            # Garantir que TIV e Price sejam numéricos para o gráfico de dispersão
-            merged['TIV'] = pd.to_numeric(merged.get('TIV', 0), errors='coerce').fillna(0)
-            merged['Price'] = pd.to_numeric(merged.get('Price', 0), errors='coerce').fillna(0)
+            # Tratamento final de possíveis Nulos (carros que não constavam na Fipe ficam com 0)
+            merged['TIV'] = merged['TIV'].fillna(0)
+            merged['Price'] = merged['Price'].fillna(0)
 
             return merged
         except Exception as e:
-            # Em vez de apenas retornar vazio, mostra o erro EXATO na tela para você debugar
-            st.error(f"⚠️ Erro de Estrutura no Excel: {e}")
+            st.error(f"⚠️ Erro no Cruzamento de Dados: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
