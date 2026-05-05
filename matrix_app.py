@@ -436,35 +436,48 @@ if not token_atual: st.stop()
 df = load_data(token_atual)
 
 if not df.empty:
+    # 5.1 Sidebar (Apenas Configurações Visuais e Idioma)
     with st.sidebar:
         st.header(t("settings"))
         view_mode = st.radio(t("time_group"), [t("month"), t("quarter")], horizontal=True)
-        
         st.divider()
-        st.header(t("filters"))
-        
-        all_months = sorted(df['Month_Year'].dropna().unique(), key=lambda x: pd.to_datetime(x, format='%m/%Y'))
-        default_period = [m for m in all_months if "2026" in m]
-        mo_sel = st.multiselect(t("launch_window"), all_months, default=default_period)
-        
-        brand_list = sorted(df['Brand'].unique())
-        type_list = sorted(df['Type'].unique())
-        
-        m_sel = st.multiselect(t("brand"), brand_list, default=brand_list)
-        t_sel = st.multiselect(t("category"), type_list, default=type_list)
-        
-        min_p_data, max_p_data = int(df['Price'].min()), int(df['Price'].max())
-        slider_min = min(85000, min_p_data)
-        slider_max = max(400000, max_p_data)
-        p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
 
-        df_f = df[
-            (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
-            (df['Month_Year'].isin(mo_sel)) & (df['Price'] >= p_sel[0]) & (df['Price'] <= p_sel[1])
-        ]
+    # 5.2 Preparação de Dados dos Filtros Globais
+    all_months = sorted(df['Month_Year'].dropna().unique(), key=lambda x: pd.to_datetime(x, format='%m/%Y'))
+    default_period = [m for m in all_months if "2026" in m]
+    brand_list = sorted(df['Brand'].unique())
+    type_list = sorted(df['Type'].unique())
+    
+    min_p_data, max_p_data = int(df['Price'].min()), int(df['Price'].max())
+    slider_min = min(85000, min_p_data)
+    slider_max = max(400000, max_p_data)
 
     st.title(t("app_title"))
     
+    # 5.3 Top Bar: Filtros de Mercado e Filtro de Value Y/N integrados
+    with st.expander(t("filters"), expanded=True):
+        f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns(5)
+        
+        with f_col1:
+            mo_sel = st.multiselect(t("launch_window"), all_months, default=default_period)
+        with f_col2:
+            m_sel = st.multiselect(t("brand"), brand_list, default=brand_list)
+        with f_col3:
+            t_sel = st.multiselect(t("category"), type_list, default=type_list)
+        with f_col4:
+            p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
+        with f_col5:
+            # O Filtro Y/N foi posicionado aqui, junto com os filtros globais (Top Bar)
+            value_options = ["Y", "N"]
+            value_sel = st.multiselect(t("value_filter"), value_options, default=value_options)
+
+    # Aplicação do Filtro Global ao DataFrame Principal
+    df_f = df[
+        (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
+        (df['Month_Year'].isin(mo_sel)) & (df['Price'] >= p_sel[0]) & (df['Price'] <= p_sel[1])
+    ]
+
+    # Criação das Abas
     tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit"), t("tab_spec")])
 
     # ==================== ABA 1: MATRIZ ====================
@@ -662,7 +675,7 @@ if not df.empty:
                         time.sleep(1.5)
                         st.rerun()
 
-    # ==================== ABA 4: SPEC DISPERSION (VfM Removido & Mapeamento Adicionado) ====================
+    # ==================== ABA 4: SPEC DISPERSION ====================
     with tab4:
         st.subheader(t("tab_spec"))
         
@@ -672,26 +685,22 @@ if not df.empty:
             sc1, sc2 = st.columns([1, 2])
             
             with sc1:
-                # O filtro agora exibirá o nome real e não mais os códigos como DM_0001
                 dim_options = sorted(df_spec['Dimension'].unique())
                 dim_sel = st.selectbox(t("dimension"), dim_options)
                 
+                # O Slider de Preço Spec-range manteve-se aqui, pois diz respeito apenas à Aba de Dispersão
                 spec_pmin, spec_pmax = int(df_spec['Price'].min()), int(df_spec['Price'].max())
                 spec_slider_min = min(85000, spec_pmin)
                 spec_slider_max = max(400000, spec_pmax)
                 spec_p_sel = st.slider(t("price") + " (Spec Range)", spec_slider_min, spec_slider_max, (85000, 400000), step=1000)
                 
-                # Novo Componente de Filtragem por Valor (Y/N)
-                value_options = ["Y", "N"]
-                value_sel = st.multiselect(t("value_filter"), value_options, default=value_options)
-                
+            # O value_sel (Filtro Y/N) agora vem dinamicamente lá da TOP BAR GLOBAL!
             df_spec_filtered = df_spec[(df_spec['Dimension'] == dim_sel) & 
                                        (df_spec['Price'] >= spec_p_sel[0]) & 
                                        (df_spec['Price'] <= spec_p_sel[1]) &
                                        (df_spec['Value'].isin(value_sel))].copy()
             
             with sc2:
-                # Cálculo do Installation Ratio com base na métrica convertida ("Y")
                 tiv_y = df_spec_filtered[df_spec_filtered['Value'] == 'Y']['TIV'].sum()
                 tiv_total = df_spec_filtered['TIV'].sum()
                 ratio = (tiv_y / tiv_total * 100) if tiv_total > 0 else 0
