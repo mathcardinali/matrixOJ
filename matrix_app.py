@@ -454,7 +454,7 @@ if not df.empty:
 
     st.title(t("app_title"))
     
-# 5.3 Top Bar: Filtros de Mercado e Filtro de Value Y/N integrados
+    # 5.3 Top Bar: Filtros de Mercado e Filtro de Value Y/N integrados
     
     # CSS Customizado para compactar a altura dos Multiselects
     st.markdown(
@@ -492,6 +492,7 @@ if not df.empty:
         with f_col4:
             p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
         with f_col5:
+            # O Filtro Y/N foi posicionado aqui, junto com os filtros globais (Top Bar)
             value_options = ["Y", "N"]
             value_sel = st.multiselect(t("value_filter"), value_options, default=value_options)
 
@@ -500,6 +501,9 @@ if not df.empty:
         (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
         (df['Month_Year'].isin(mo_sel)) & (df['Price'] >= p_sel[0]) & (df['Price'] <= p_sel[1])
     ]
+
+    # Criação das Abas
+    tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit"), t("tab_spec")])
 
     # ==================== ABA 1: MATRIZ ====================
     with tab1:
