@@ -74,8 +74,8 @@ translations = {
         "success_deleted": "✅ Vehicle {name} deleted successfully!",
         "dimension": "Dimension",
         "installation_ratio": "Installation Ratio",
-        "optimal_price": "Optimal Price Point",
-        "opt_method": "Optimization Method"
+        "value_filter": "Value Filter (Y/N)",
+        "no_cross_data": "🔄 Cross data not found. Please fill in the Excel sheets correctly."
     },
     "ZH": {
         "login_title": "🔒 登录 - 市场情报",
@@ -129,13 +129,14 @@ translations = {
         "success_deleted": "✅ 车辆 {name} 已成功删除！",
         "dimension": "维度",
         "installation_ratio": "安装率",
-        "optimal_price": "最佳价格点",
-        "opt_method": "优化方法"
+        "value_filter": "值筛选 (Y/N)",
+        "no_cross_data": "🔄 未找到交叉数据。请正确填写 Excel 工作表。"
     }
 }
 
-is_chinese = st.sidebar.toggle("🌐 中文 / English", value=False)
-st.session_state.lang = "ZH" if is_chinese else "EN"
+# Interruptor de Idioma no topo da Sidebar
+lang_choice = st.sidebar.radio("🌐 Language / 语言", ["English", "中文 (Chinese)"], horizontal=True)
+st.session_state.lang = "ZH" if "中文" in lang_choice else "EN"
 
 def t(key):
     return translations[st.session_state.lang].get(key, key)
@@ -242,7 +243,7 @@ def load_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ISOLAMENTO DO NOVO MÓDULO (SPEC DISPERSION ETL) COM BLINDAGEM TOTAL ---
+# --- MÓDULO SPEC DISPERSION ETL COM MAPEAMENTO DE METADADOS ---
 @st.cache_data(ttl=60)
 def load_spec_data(token):
     url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
@@ -257,18 +258,28 @@ def load_spec_data(token):
             df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
             df_price = pd.read_excel(excel_data, sheet_name='Price_Policy')
 
-            # 1. Blindagem de espaços nos nomes das colunas
             for df_temp in [df_keys, df_fipe, df_dim, df_price]:
                 df_temp.columns = df_temp.columns.astype(str).str.strip()
 
-            # 2. Padroniza Nomes das Colunas Chaves (Ajustado para Base_MI_2)
+            # --- Criação do Dicionário de Mapeamento (Code -> Dimension Name) ---
+            feature_map = {}
+            col_code = [c for c in df_keys.columns if str(c).strip().lower() in ['code', 'código', 'codigo']]
+            col_dim_name = [c for c in df_keys.columns if str(c).strip().lower() in ['dimension', 'dimensão', 'dimensao', 'feature']]
+            
+            if col_code and col_dim_name:
+                mapping_df = df_keys[[col_code[0], col_dim_name[0]]].dropna().drop_duplicates()
+                feature_map = dict(zip(
+                    mapping_df[col_code[0]].astype(str).str.strip().str.upper(), 
+                    mapping_df[col_dim_name[0]].astype(str).str.strip()
+                ))
+
+            # Padroniza Nomes das Colunas Chaves
             def padronizar_coluna(df, nomes_aceitos, nome_final):
                 for col in df.columns:
                     if col.lower() in [n.lower() for n in nomes_aceitos]:
                         df.rename(columns={col: nome_final}, inplace=True)
                         break
 
-            # Mapeamento estrito para as nomenclaturas reais da sua planilha
             padronizar_coluna(df_keys, ['Comercial', 'Control', 'Dimensions_Key', 'Dimension_Key', 'Veiculo', 'Carro'], 'Dimensions_Key')
             padronizar_coluna(df_keys, ['FIPE', 'Fipe_Key', 'Fipe Key', 'Modelo_Versao'], 'Fipe_Key')
             padronizar_coluna(df_price, ['Control', 'Comercial', 'Dimensions_Key', 'Dimension_Key'], 'Dimensions_Key')
@@ -279,7 +290,7 @@ def load_spec_data(token):
             if 'Dimensions_Key' not in df_keys.columns:
                 raise KeyError(f"Aba 'Keys' não possui coluna válida. Colunas encontradas: {list(df_keys.columns)}")
 
-            # 3. Limpeza Absoluta de Chaves
+            # Limpeza Absoluta de Chaves
             def clean_key(series):
                 return series.astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.upper()
 
@@ -292,7 +303,7 @@ def load_spec_data(token):
                 
             df_fipe['MODELO_VERSAO'] = clean_key(df_fipe['MODELO_VERSAO'])
 
-            # 4. Tratamento de Fipe e Price
+            # Tratamento de Fipe e Price
             if 'TIV' not in df_fipe.columns: df_fipe['TIV'] = 0
             df_fipe['TIV'] = pd.to_numeric(df_fipe['TIV'], errors='coerce').fillna(0)
             fipe_ytd = df_fipe.groupby('MODELO_VERSAO')['TIV'].sum().reset_index()
@@ -300,16 +311,26 @@ def load_spec_data(token):
             if 'Price' not in df_price.columns: df_price['Price'] = 0
             df_price['Price'] = pd.to_numeric(df_price['Price'], errors='coerce').fillna(0)
 
-            # 5. Tratamento de Especificações (Dimension_List)
+            # Tratamento de Especificações (Dimension_List) com conversão Y/N
             dim_col = df_dim.columns[0] 
             dim_melt = df_dim.melt(id_vars=[dim_col], var_name='Dimensions_Key', value_name='Value')
             dim_melt.rename(columns={dim_col: 'Dimension'}, inplace=True)
-            dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({'': 'N', ' ': 'N'})
+            
+            # Conversão Lógica Sim->Y e Não->N
+            dim_melt['Value'] = dim_melt['Value'].fillna('N').replace({
+                'S': 'Y', 's': 'Y', 'Sim': 'Y', 'Yes': 'Y',
+                'N': 'N', 'n': 'N', 'Não': 'N', 'No': 'N',
+                '': 'N', ' ': 'N'
+            })
+            
+            # Aplica o Mapeamento da Dimensão
+            dim_melt['Dimension_Code'] = dim_melt['Dimension'].astype(str).str.strip().str.upper()
+            if feature_map:
+                dim_melt['Dimension'] = dim_melt['Dimension_Code'].map(feature_map).fillna(dim_melt['Dimension'])
+            
             dim_melt['Dimensions_Key'] = clean_key(dim_melt['Dimensions_Key'])
 
-            # ==========================================
-            # O CROSSCHECK (JOIN) SEGURO
-            # ==========================================
+            # CROSSCHECK (JOIN) SEGURO
             df_keys_clean = df_keys[['Dimensions_Key', 'Fipe_Key']].dropna().drop_duplicates('Dimensions_Key')
             merged = dim_melt.merge(df_keys_clean, on='Dimensions_Key', how='left')
             
@@ -641,7 +662,7 @@ if not df.empty:
                         time.sleep(1.5)
                         st.rerun()
 
-    # ==================== ABA 4: SPEC DISPERSION & ALGORITMO VfM ====================
+    # ==================== ABA 4: SPEC DISPERSION (VfM Removido & Mapeamento Adicionado) ====================
     with tab4:
         st.subheader(t("tab_spec"))
         
@@ -651,6 +672,7 @@ if not df.empty:
             sc1, sc2 = st.columns([1, 2])
             
             with sc1:
+                # O filtro agora exibirá o nome real e não mais os códigos como DM_0001
                 dim_options = sorted(df_spec['Dimension'].unique())
                 dim_sel = st.selectbox(t("dimension"), dim_options)
                 
@@ -659,58 +681,28 @@ if not df.empty:
                 spec_slider_max = max(400000, spec_pmax)
                 spec_p_sel = st.slider(t("price") + " (Spec Range)", spec_slider_min, spec_slider_max, (85000, 400000), step=1000)
                 
+                # Novo Componente de Filtragem por Valor (Y/N)
+                value_options = ["Y", "N"]
+                value_sel = st.multiselect(t("value_filter"), value_options, default=value_options)
+                
             df_spec_filtered = df_spec[(df_spec['Dimension'] == dim_sel) & 
                                        (df_spec['Price'] >= spec_p_sel[0]) & 
-                                       (df_spec['Price'] <= spec_p_sel[1])].copy()
+                                       (df_spec['Price'] <= spec_p_sel[1]) &
+                                       (df_spec['Value'].isin(value_sel))].copy()
             
             with sc2:
-                tiv_s = df_spec_filtered[df_spec_filtered['Value'] == 'S']['TIV'].sum()
+                # Cálculo do Installation Ratio com base na métrica convertida ("Y")
+                tiv_y = df_spec_filtered[df_spec_filtered['Value'] == 'Y']['TIV'].sum()
                 tiv_total = df_spec_filtered['TIV'].sum()
-                ratio = (tiv_s / tiv_total * 100) if tiv_total > 0 else 0
+                ratio = (tiv_y / tiv_total * 100) if tiv_total > 0 else 0
                 st.metric(t("installation_ratio"), f"{ratio:.1f}%")
                 
             fig_spec = px.scatter(df_spec_filtered, x='Price', y='TIV', color='Value', 
-                                  color_discrete_map={'S': '#2E7D32', 'N': '#D32F2F'},
+                                  color_discrete_map={'Y': '#2E7D32', 'N': '#D32F2F'},
                                   hover_data=['Dimensions_Key', 'Price', 'TIV'])
             
             fig_spec.update_layout(template="plotly_white", height=600)
             st.plotly_chart(fig_spec, use_container_width=True)
             
-# --- ALGORITMO PREDITIVO VALUE FOR MONEY ---
-            st.divider()
-            
-            df_s = df_spec_filtered[df_spec_filtered['Value'] == 'S'].dropna(subset=['Price', 'TIV']).copy()
-            opt_price, method = 0, "Aguardando dados estruturados"
-            
-            if len(df_s) > 2:
-                # 1. Tratamento 100% Pandas para evitar conflito de tipos (ExtensionArrays) com o Numpy
-                df_s['Price_Clean'] = pd.to_numeric(df_s['Price'], errors='coerce').fillna(0.0)
-                df_s['TIV_Clean'] = pd.to_numeric(df_s['TIV'], errors='coerce').fillna(0.0)
-                
-                # Extrai os vetores puramente como Numpy floats (Garante compatibilidade absoluta em qualquer nuvem)
-                x = df_s['Price_Clean'].to_numpy(dtype=float)
-                y = df_s['TIV_Clean'].to_numpy(dtype=float)
-                
-                # 2. Validação usando método nativo do Pandas (.nunique()) em vez de np.unique
-                if df_s['Price_Clean'].nunique() > 1:
-                    coeffs = np.polyfit(x, y, 2)
-                    a, b, c = coeffs
-                    
-                    if a < 0:
-                        opt_price = -b / (2 * a)
-                        # Impede que o modelo sugira um preço fora da realidade analisada
-                        opt_price = max(min(opt_price, x.max()), x.min())
-                        method = "Otimização Quadrática (Max. Elasticity Curve)"
-                    else:
-                        # Fallback de Clusterização inteligente
-                        df_s['Price_Bin'] = pd.cut(df_s['Price_Clean'], bins=5)
-                        best_bin = df_s.groupby('Price_Bin')['TIV_Clean'].mean().idxmax()
-                        opt_price = best_bin.mid
-                        method = "Clusterização (Máxima Média Histórica)"
-                else:
-                    opt_price = x[0] if len(x) > 0 else 0
-                    method = "Preço Único de Mercado"
-                    
-            st.success(f"**{t('optimal_price')}**: R$ {opt_price:,.0f} | **{t('opt_method')}**: {method}")
         else:
-            st.info("🔄 Os dados cruzados não foram encontrados. Certifique-se de preencher corretamente as abas no Excel.")
+            st.info(t("no_cross_data"))
