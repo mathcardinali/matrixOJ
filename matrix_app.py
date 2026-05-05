@@ -571,7 +571,13 @@ if not df.empty:
             uniformtext_mode='hide',
             legend_title_text=t("category")
         )
-        fig.update_xaxes(autorange=True)
+        
+        # Ajuste para forçar todos os meses no eixo X quando for Data de Lançamento
+        if e_x == 'Launch Date':
+            fig.update_xaxes(autorange=True, dtick="M1", tickformat="%m/%Y")
+        else:
+            fig.update_xaxes(autorange=True)
+            
         fig.update_yaxes(autorange=True)
 
         st.plotly_chart(fig, use_container_width=True)
