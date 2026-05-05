@@ -43,6 +43,7 @@ translations = {
         "launch_window": "Launch Window",
         "brand": "Brand",
         "category": "Category (Type)",
+        "powertrain": "Powertrain",
         "price": "Price Range (R$)",
         "tab_matrix": "📊 Competitive Matrix",
         "tab_radar": "📰 News Radar & Fast Add",
@@ -51,7 +52,6 @@ translations = {
         "x_axis": "X Axis",
         "y_axis": "Y Axis",
         "name": "Name (Model)",
-        "powertrain": "Powertrain",
         "length": "Length (mm)",
         "width": "Width (mm)",
         "height": "Height (mm)",
@@ -98,6 +98,7 @@ translations = {
         "launch_window": "发布窗口",
         "brand": "品牌",
         "category": "类别 (Type)",
+        "powertrain": "动力系统",
         "price": "价格范围 (R$)",
         "tab_matrix": "📊 竞争矩阵",
         "tab_radar": "📰 新闻雷达与快速添加",
@@ -106,7 +107,6 @@ translations = {
         "x_axis": "X 轴",
         "y_axis": "Y 轴",
         "name": "名称 (型号)",
-        "powertrain": "动力系统",
         "length": "长度 (mm)",
         "width": "宽度 (mm)",
         "height": "高度 (mm)",
@@ -237,6 +237,7 @@ def load_data(token):
             df['Quarter'] = df['Launch Date'].dt.to_period('Q').astype(str)
             df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
             df['Type'] = df['Type'].fillna(t('others')).astype(str)
+            df['Powertrain'] = df['Powertrain'].fillna(t('others')).astype(str)
             df['Type of info'] = df['Type of info'].fillna('Speculation').astype(str)
             return df
         except Exception as e:
@@ -448,13 +449,14 @@ if not df.empty:
     brand_list = sorted(df['Brand'].unique())
     type_list = sorted(df['Type'].unique())
     
+    # Novo Filtro Global: Powertrain
+    powertrain_list = sorted(df['Powertrain'].unique())
+    
     min_p_data, max_p_data = int(df['Price'].min()), int(df['Price'].max())
     slider_min = min(85000, min_p_data)
     slider_max = max(400000, max_p_data)
 
     st.title(t("app_title"))
-    
-    # 5.3 Top Bar: Filtros de Mercado e Filtro de Value Y/N integrados
     
     # CSS Customizado para compactar a altura dos Multiselects
     st.markdown(
@@ -478,10 +480,10 @@ if not df.empty:
         unsafe_allow_html=True,
     )
 
+    # 5.3 Top Bar: Filtros de Mercado, Filtro de Powertrain e Filtro Y/N integrados
     with st.expander(t("filters"), expanded=True):
-        # Ajuste de proporção das colunas: 
-        # Launch (1), Brand (1.5), Category (1.5), Price Slider (2.5), Y/N (1)
-        f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns([1, 1.5, 1.5, 2.5, 1])
+        # Ajuste de proporção das colunas com a nova adição
+        f_col1, f_col2, f_col3, f_col4, f_col5, f_col6 = st.columns([1, 1.2, 1.2, 1.2, 2.5, 0.8])
         
         with f_col1:
             mo_sel = st.multiselect(t("launch_window"), all_months, default=default_period)
@@ -490,16 +492,22 @@ if not df.empty:
         with f_col3:
             t_sel = st.multiselect(t("category"), type_list, default=type_list)
         with f_col4:
-            p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
+            # Novo Filtro Multi-Seleção de Powertrain
+            pt_sel = st.multiselect(t("powertrain"), powertrain_list, default=powertrain_list)
         with f_col5:
-            # O Filtro Y/N foi posicionado aqui, junto com os filtros globais (Top Bar)
+            p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
+        with f_col6:
             value_options = ["Y", "N"]
             value_sel = st.multiselect(t("value_filter"), value_options, default=value_options)
 
-    # Aplicação do Filtro Global ao DataFrame Principal
+    # Aplicação do Filtro Global ao DataFrame Principal (Aba Matriz, Edição, etc)
     df_f = df[
-        (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
-        (df['Month_Year'].isin(mo_sel)) & (df['Price'] >= p_sel[0]) & (df['Price'] <= p_sel[1])
+        (df['Brand'].isin(m_sel)) & 
+        (df['Type'].isin(t_sel)) & 
+        (df['Powertrain'].isin(pt_sel)) & 
+        (df['Month_Year'].isin(mo_sel)) & 
+        (df['Price'] >= p_sel[0]) & 
+        (df['Price'] <= p_sel[1])
     ]
 
     # Criação das Abas
