@@ -62,6 +62,7 @@ translations = {
         "fetch_news_btn": "📰 Fetch News (On-Demand)",
         "start_date": "Start Date",
         "end_date": "End Date",
+        "keyword_filter": "Keyword Filter",
         "loading_news": "Scanning news portals...",
         "no_news": "No recent launch news found for the selected period.",
         "fast_register": "⚡ Fast Register",
@@ -117,6 +118,7 @@ translations = {
         "fetch_news_btn": "📰 获取新闻 (按需)",
         "start_date": "开始日期",
         "end_date": "结束日期",
+        "keyword_filter": "关键字过滤",
         "loading_news": "扫描新闻门户...",
         "no_news": "在所选期间未找到最近的发布新闻。",
         "fast_register": "⚡ 快速注册",
@@ -244,7 +246,7 @@ def load_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- MÓDULO SPEC DISPERSION ETL COM MAPEAMENTO DE METADADOS ---
+# --- MÓDULO SPEC DISPERSION ETL COM MAPEAMENTO DE METADADOS E BUSCA DE ABAS INTELIGENTE ---
 @st.cache_data(ttl=60)
 def load_spec_data(token):
     url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
@@ -253,11 +255,20 @@ def load_spec_data(token):
     if resp.status_code == 200:
         try:
             excel_data = BytesIO(resp.content)
+            xls = pd.ExcelFile(excel_data)
             
-            df_keys = pd.read_excel(excel_data, sheet_name='Keys')
-            df_fipe = pd.read_excel(excel_data, sheet_name='Fipe')
-            df_dim = pd.read_excel(excel_data, sheet_name='Dimension_List')
-            df_price = pd.read_excel(excel_data, sheet_name='Price_Policy')
+            # --- BUSCA INTELIGENTE DE ABAS (Fuzzy Sheet Matcher) ---
+            def load_sheet_by_keywords(xls_obj, keywords):
+                for sheet in xls_obj.sheet_names:
+                    if any(kw.lower() in sheet.lower().strip() for kw in keywords):
+                        return pd.read_excel(xls_obj, sheet_name=sheet)
+                raise ValueError(f"Aba {keywords[0].upper()} não encontrada. Planilhas disponíveis: {xls_obj.sheet_names}")
+
+            # Busca as abas pelas palavras-chave, ignorando erros de digitação nos nomes das abas
+            df_keys = load_sheet_by_keywords(xls, ['keys', 'key', 'chave', 'de/para', 'depara'])
+            df_fipe = load_sheet_by_keywords(xls, ['fipe', 'volume'])
+            df_dim = load_sheet_by_keywords(xls, ['dimension', 'dimensão', 'dimensao', 'spec'])
+            df_price = load_sheet_by_keywords(xls, ['price', 'preço', 'preco', 'policy'])
 
             for df_temp in [df_keys, df_fipe, df_dim, df_price]:
                 df_temp.columns = df_temp.columns.astype(str).str.strip()
@@ -289,7 +300,7 @@ def load_spec_data(token):
             padronizar_coluna(df_fipe, ['TIV', 'Volume', 'Vendas', 'Emplacamentos'], 'TIV')
 
             if 'Dimensions_Key' not in df_keys.columns:
-                raise KeyError(f"Aba 'Keys' não possui coluna válida. Colunas encontradas: {list(df_keys.columns)}")
+                raise KeyError(f"Aba de Chaves (Keys) não possui coluna válida. Colunas encontradas: {list(df_keys.columns)}")
 
             # Limpeza Absoluta de Chaves
             def clean_key(series):
@@ -590,16 +601,26 @@ if not df.empty:
         if st.button(t("fetch_news_btn"), use_container_width=True):
             st.session_state['show_news'] = True
         
-        col_dates = st.columns(2)
+        # Inserção do Filtro de Palavras-Chave ao lado das Datas
+        col_dates = st.columns([1, 1, 2]) # Aumentei uma coluna para o Input
         start_news = col_dates[0].date_input(t("start_date"), date.today().replace(day=1))
         end_news = col_dates[1].date_input(t("end_date"), date.today())
+        # Filtro de texto adicionado aqui
+        user_keyword = col_dates[2].text_input(t("keyword_filter"), placeholder="e.g. Omoda, PHEV, Preço...")
         
         if st.session_state.get('show_news', False):
             with st.spinner(t("loading_news")):
                 df_news = fetch_automotive_news()
                 
                 if not df_news.empty:
+                    # Aplica o filtro de datas
                     df_news = df_news[(df_news['Date'] >= start_news) & (df_news['Date'] <= end_news)]
+                    
+                    # Aplica o filtro da nova palavra-chave (case insensitive) na Title ou Link
+                    if user_keyword.strip():
+                        mask = df_news['Title'].str.contains(user_keyword.strip(), case=False, na=False) | \
+                               df_news['Link'].str.contains(user_keyword.strip(), case=False, na=False)
+                        df_news = df_news[mask]
                     
                     if not df_news.empty:
                         brands_found = sorted(df_news['Brand'].unique())
@@ -629,18 +650,24 @@ if not df.empty:
             with st.form("quick_add_form", clear_on_submit=True):
                 col_f1, col_f2, col_f3 = st.columns(3)
                 with col_f1:
-                    nb = st.selectbox(t("brand") + " *", brand_list, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
+                    ext_brands = brand_list + [t("new_brand_opt")]
+                    nb_sel = st.selectbox(t("brand") + " *", ext_brands, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
+                    nb_new = st.text_input(t("type_new_brand"), placeholder="If '➕ New Brand' is selected")
                     nn = st.text_input(t("name") + " *", value=default_name_add)
-                    nt = st.selectbox(t("category") + " *", type_list)
+                    
                 with col_f2:
+                    nt = st.selectbox(t("category") + " *", type_list)
                     npt = st.selectbox(t("powertrain") + " *", ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"])
                     np = st.number_input(t("price") + " *", min_value=0, step=1000)
-                    nl = st.number_input(t("length"), min_value=0, step=1)
+                    
                 with col_f3:
+                    nl = st.number_input(t("length"), min_value=0, step=1)
                     nd = st.date_input(t("launch_window"))
                     ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
                 if st.form_submit_button(t("save")):
+                    nb = nb_new.strip().upper() if nb_sel == t("new_brand_opt") else nb_sel
+                    
                     if not nb or not nn or not nt or not npt or np <= 0:
                         st.warning(t("mandatory_warning"))
                     else:
@@ -670,15 +697,19 @@ if not df.empty:
             with st.form("edit_car"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    eb = st.selectbox(t("brand") + " *", brand_list, index=brand_list.index(row_edit['Brand']) if row_edit['Brand'] in brand_list else 0)
+                    ext_brands = brand_list + [t("new_brand_opt")]
+                    eb_sel = st.selectbox(t("brand") + " *", ext_brands, index=brand_list.index(row_edit['Brand']) if row_edit['Brand'] in brand_list else 0)
+                    eb_new = st.text_input(t("type_new_brand"), placeholder="If '➕ New Brand' is selected", key="edit_brand_new")
                     en = st.text_input(t("name") + " *", value=row_edit['Name'])
-                    et = st.selectbox(t("category") + " *", type_list, index=type_list.index(row_edit['Type']) if row_edit['Type'] in type_list else 0)
+                    
                 with col2:
+                    et = st.selectbox(t("category") + " *", type_list, index=type_list.index(row_edit['Type']) if row_edit['Type'] in type_list else 0)
                     pts = ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"]
                     ept = st.selectbox(t("powertrain") + " *", pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
                     ep = st.number_input(t("price") + " *", min_value=0, step=1000, value=int(row_edit['Price']))
-                    el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
+                    
                 with col3:
+                    el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
                     ed = st.date_input(t("launch_window"), value=row_edit['Launch Date'] if pd.notnull(row_edit['Launch Date']) else date.today())
                     stss = ["Official", "Speculation"]
                     es = st.selectbox(t("status"), stss, index=stss.index(row_edit['Type of info']) if row_edit['Type of info'] in stss else 0)
@@ -690,6 +721,8 @@ if not df.empty:
                     btn_delete = st.form_submit_button(t("delete_btn"))
 
                 if btn_save:
+                    eb = eb_new.strip().upper() if eb_sel == t("new_brand_opt") else eb_sel
+                    
                     if not eb or not en or not et or not ept or ep <= 0:
                         st.warning(t("mandatory_warning"))
                     else:
