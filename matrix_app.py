@@ -454,9 +454,34 @@ if not df.empty:
 
     st.title(t("app_title"))
     
-    # 5.3 Top Bar: Filtros de Mercado e Filtro de Value Y/N integrados
+# 5.3 Top Bar: Filtros de Mercado e Filtro de Value Y/N integrados
+    
+    # CSS Customizado para compactar a altura dos Multiselects
+    st.markdown(
+        """
+        <style>
+        /* Limita a altura das caixas de multiselect e adiciona scroll */
+        div[data-baseweb="select"] > div:first-child {
+            max-height: 85px; 
+            overflow-y: auto;
+        }
+        /* Ajuste fino da scrollbar interna do multiselect (opcional para estética) */
+        div[data-baseweb="select"] > div:first-child::-webkit-scrollbar {
+            width: 4px;
+        }
+        div[data-baseweb="select"] > div:first-child::-webkit-scrollbar-thumb {
+            background-color: #cccccc;
+            border-radius: 4px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     with st.expander(t("filters"), expanded=True):
-        f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns(5)
+        # Ajuste de proporção das colunas: 
+        # Launch (1), Brand (1.5), Category (1.5), Price Slider (2.5), Y/N (1)
+        f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns([1, 1.5, 1.5, 2.5, 1])
         
         with f_col1:
             mo_sel = st.multiselect(t("launch_window"), all_months, default=default_period)
@@ -467,7 +492,6 @@ if not df.empty:
         with f_col4:
             p_sel = st.slider(t("price"), slider_min, slider_max, (85000, 400000), step=1000)
         with f_col5:
-            # O Filtro Y/N foi posicionado aqui, junto com os filtros globais (Top Bar)
             value_options = ["Y", "N"]
             value_sel = st.multiselect(t("value_filter"), value_options, default=value_options)
 
@@ -476,9 +500,6 @@ if not df.empty:
         (df['Brand'].isin(m_sel)) & (df['Type'].isin(t_sel)) & 
         (df['Month_Year'].isin(mo_sel)) & (df['Price'] >= p_sel[0]) & (df['Price'] <= p_sel[1])
     ]
-
-    # Criação das Abas
-    tab1, tab2, tab3, tab4 = st.tabs([t("tab_matrix"), t("tab_radar"), t("tab_edit"), t("tab_spec")])
 
     # ==================== ABA 1: MATRIZ ====================
     with tab1:
