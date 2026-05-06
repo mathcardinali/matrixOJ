@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.io as pio
 from datetime import date, datetime
 from time import mktime
 import time
@@ -17,6 +18,9 @@ import feedparser
 # 1. CONFIGURAÇÕES, PERSISTÊNCIA E I18N
 # ==========================================
 st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layout="wide")
+
+# Configuração Global para garantir compatibilidade e qualidade de renderização
+st.set_option('deprecation.showPyplotGlobalUse', False)
 
 CACHE_FILE = "token_cache.bin"
 
@@ -62,7 +66,6 @@ translations = {
         "fetch_news_btn": "📰 Fetch News (On-Demand)",
         "start_date": "Start Date",
         "end_date": "End Date",
-        "keyword_filter": "Keyword Filter",
         "loading_news": "Scanning news portals...",
         "no_news": "No recent launch news found for the selected period.",
         "fast_register": "⚡ Fast Register",
@@ -76,7 +79,8 @@ translations = {
         "dimension": "Dimension",
         "installation_ratio": "Installation Ratio",
         "value_filter": "Value Filter (Y/N)",
-        "no_cross_data": "🔄 Cross data not found. Please fill in the Excel sheets correctly."
+        "no_cross_data": "🔄 Cross data not found. Please fill in the Excel sheets correctly.",
+        "download_chart": "📥 Download High-DPI Chart"
     },
     "ZH": {
         "login_title": "🔒 登录 - 市场情报",
@@ -132,7 +136,8 @@ translations = {
         "dimension": "维度",
         "installation_ratio": "安装率",
         "value_filter": "值筛选 (Y/N)",
-        "no_cross_data": "🔄 未找到交叉数据。请正确填写 Excel 工作表。"
+        "no_cross_data": "🔄 未找到交叉数据。请正确填写 Excel 工作表。",
+        "download_chart": "📥 下载高清图表 (High-DPI)"
     }
 }
 
@@ -142,6 +147,14 @@ st.session_state.lang = "ZH" if "中文" in lang_choice else "EN"
 
 def t(key):
     return translations[st.session_state.lang].get(key, key)
+
+# Configuração global de exportação High-DPI para Plotly
+plotly_export_config = {
+    'toImageButtonOptions': {
+        'format': 'png',
+        'scale': 2
+    }
+}
 
 # ==========================================
 # 2. SISTEMA DE LOGIN
@@ -591,7 +604,17 @@ if not df.empty:
             
         fig.update_yaxes(autorange=True)
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=plotly_export_config)
+        
+        # Botão dedicado de Exportação High-DPI para a Matriz
+        buf_matrix = BytesIO()
+        buf_matrix.write(pio.to_image(fig, format='png', scale=2, width=1200, height=800))
+        st.download_button(
+            label=t("download_chart"), 
+            data=buf_matrix.getvalue(), 
+            file_name="competitive_matrix_high_dpi.png", 
+            mime="image/png"
+        )
 
     # ==================== ABA 2: NEWS RADAR & CADASTRO ====================
     with tab2:
@@ -783,7 +806,17 @@ if not df.empty:
                                   hover_data=['Dimensions_Key', 'Price', 'TIV'])
             
             fig_spec.update_layout(template="plotly_white", height=600)
-            st.plotly_chart(fig_spec, use_container_width=True)
+            st.plotly_chart(fig_spec, use_container_width=True, config=plotly_export_config)
+            
+            # Botão dedicado de Exportação High-DPI para Spec Dispersion
+            buf_spec = BytesIO()
+            buf_spec.write(pio.to_image(fig_spec, format='png', scale=2, width=1200, height=800))
+            st.download_button(
+                label=t("download_chart"), 
+                data=buf_spec.getvalue(), 
+                file_name="spec_dispersion_high_dpi.png", 
+                mime="image/png"
+            )
             
         else:
             st.info(t("no_cross_data"))
