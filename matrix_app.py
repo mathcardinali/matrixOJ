@@ -19,9 +19,6 @@ import feedparser
 # ==========================================
 st.set_page_config(page_title="Automotive MI & Launches", page_icon="🚗", layout="wide")
 
-# Configuração Global para garantir compatibilidade e qualidade de renderização
-st.set_option('deprecation.showPyplotGlobalUse', False)
-
 CACHE_FILE = "token_cache.bin"
 
 # Dicionário de Internacionalização (i18n)
