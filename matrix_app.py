@@ -63,6 +63,7 @@ translations = {
         "fetch_news_btn": "📰 Fetch News (On-Demand)",
         "start_date": "Start Date",
         "end_date": "End Date",
+        "keyword_filter": "Keyword Filter",
         "loading_news": "Scanning news portals...",
         "no_news": "No recent launch news found for the selected period.",
         "fast_register": "⚡ Fast Register",
@@ -376,17 +377,42 @@ def load_spec_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
+
+# ==========================================
+# 3.1. FUNÇÃO CORRIGIDA DE SAVE DATA (PRESERVA ABAS EXISTENTES)
+# ==========================================
 def save_data(df, token):
-    output = BytesIO()
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    # Fazemos o download do arquivo atual INTEIRO para não perder as outras abas
+    resp_get = requests.get(url, headers=headers)
+    if resp_get.status_code != 200:
+        st.error("Erro ao comunicar com o servidor OneDrive para atualizar a planilha.")
+        return False
+        
+    output = BytesIO(resp_get.content)
+    
     df_save = df.copy()
     cols = [c for c in df_save.columns if c not in ['Month_Year', 'Quarter', 'Label']]
     df_to_xlsx = df_save[cols]
     df_to_xlsx['Launch Date'] = pd.to_datetime(df_to_xlsx['Launch Date']).dt.strftime('%d/%m/%Y')
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_to_xlsx.to_excel(writer, sheet_name="Launches", index=False)
-    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Base_MI.xlsx:/content"
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
-    resp = requests.put(url, headers=headers, data=output.getvalue())
+    
+    # Usamos modo='a' (append) com if_sheet_exists='replace' para sobrescrever APENAS a aba 'Launches'
+    try:
+        with pd.ExcelWriter(output, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+            df_to_xlsx.to_excel(writer, sheet_name="Launches", index=False)
+    except Exception as e:
+        st.error(f"Erro na conversão do arquivo: {e}")
+        return False
+        
+    headers_put = {
+        'Authorization': f'Bearer {token}', 
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }
+    
+    # Enviamos o arquivo inteiro (agora com a aba 'Launches' modificada) de volta pro servidor
+    resp = requests.put(url, headers=headers_put, data=output.getvalue())
     if resp.status_code in [200, 201]:
         st.cache_data.clear()
         return True
@@ -670,9 +696,9 @@ if not df.empty:
             with st.form("quick_add_form", clear_on_submit=True):
                 col_f1, col_f2, col_f3 = st.columns(3)
                 with col_f1:
-                    ext_brands = brand_list + [t("new_brand_opt")]
+                    ext_brands = brand_list + [t("new_brand_opt")] if "new_brand_opt" in translations[st.session_state.lang] else brand_list + ["➕ New Brand"]
                     nb_sel = st.selectbox(t("brand") + " *", ext_brands, index=brand_list.index(default_brand_add) if default_brand_add in brand_list else 0)
-                    nb_new = st.text_input(t("type_new_brand"), placeholder="If '➕ New Brand' is selected")
+                    nb_new = st.text_input("New Brand Name", placeholder="If '➕ New Brand' is selected")
                     nn = st.text_input(t("name") + " *", value=default_name_add)
                     
                 with col_f2:
@@ -686,7 +712,8 @@ if not df.empty:
                     ns = st.selectbox(t("status"), ["Official", "Speculation"])
 
                 if st.form_submit_button(t("save")):
-                    nb = nb_new.strip().upper() if nb_sel == t("new_brand_opt") else nb_sel
+                    new_opt = t("new_brand_opt") if "new_brand_opt" in translations[st.session_state.lang] else "➕ New Brand"
+                    nb = nb_new.strip().upper() if nb_sel == new_opt else nb_sel
                     
                     if not nb or not nn or not nt or not npt or np <= 0:
                         st.warning(t("mandatory_warning"))
@@ -717,9 +744,9 @@ if not df.empty:
             with st.form("edit_car"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    ext_brands = brand_list + [t("new_brand_opt")]
+                    ext_brands = brand_list + [t("new_brand_opt")] if "new_brand_opt" in translations[st.session_state.lang] else brand_list + ["➕ New Brand"]
                     eb_sel = st.selectbox(t("brand") + " *", ext_brands, index=brand_list.index(row_edit['Brand']) if row_edit['Brand'] in brand_list else 0)
-                    eb_new = st.text_input(t("type_new_brand"), placeholder="If '➕ New Brand' is selected", key="edit_brand_new")
+                    eb_new = st.text_input("New Brand Name", placeholder="If '➕ New Brand' is selected", key="edit_brand_new")
                     en = st.text_input(t("name") + " *", value=row_edit['Name'])
                     
                 with col2:
@@ -727,9 +754,8 @@ if not df.empty:
                     pts = ["BEV", "PHEV", "HEV", "MHEV", "ICE", "REEV"]
                     ept = st.selectbox(t("powertrain") + " *", pts, index=pts.index(row_edit['Powertrain']) if row_edit['Powertrain'] in pts else 0)
                     ep = st.number_input(t("price") + " *", min_value=0, step=1000, value=int(row_edit['Price']))
-                    
-                with col3:
                     el = st.number_input(t("length"), min_value=0, step=1, value=int(row_edit['Lenght']) if pd.notnull(row_edit['Lenght']) else 0)
+                with col3:
                     ed = st.date_input(t("launch_window"), value=row_edit['Launch Date'] if pd.notnull(row_edit['Launch Date']) else date.today())
                     stss = ["Official", "Speculation"]
                     es = st.selectbox(t("status"), stss, index=stss.index(row_edit['Type of info']) if row_edit['Type of info'] in stss else 0)
@@ -741,7 +767,8 @@ if not df.empty:
                     btn_delete = st.form_submit_button(t("delete_btn"))
 
                 if btn_save:
-                    eb = eb_new.strip().upper() if eb_sel == t("new_brand_opt") else eb_sel
+                    new_opt = t("new_brand_opt") if "new_brand_opt" in translations[st.session_state.lang] else "➕ New Brand"
+                    eb = eb_new.strip().upper() if eb_sel == new_opt else eb_sel
                     
                     if not eb or not en or not et or not ept or ep <= 0:
                         st.warning(t("mandatory_warning"))
