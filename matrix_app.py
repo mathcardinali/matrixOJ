@@ -149,7 +149,7 @@ def t(key):
 plotly_export_config = {
     'toImageButtonOptions': {
         'format': 'png',
-        'scale': 6
+        'scale': 12
     }
 }
 
