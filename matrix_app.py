@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.io as pio
 from datetime import date, datetime
 from time import mktime
 import time
@@ -78,7 +77,7 @@ translations = {
         "installation_ratio": "Installation Ratio",
         "value_filter": "Value Filter (Y/N)",
         "no_cross_data": "🔄 Cross data not found. Please fill in the Excel sheets correctly.",
-        "download_chart": "📥 Download High-DPI Chart"
+        "download_hint": "💡 Tip: To download the High-DPI chart, click the camera icon in the top right corner of the chart."
     },
     "ZH": {
         "login_title": "🔒 登录 - 市场情报",
@@ -135,7 +134,7 @@ translations = {
         "installation_ratio": "安装率",
         "value_filter": "值筛选 (Y/N)",
         "no_cross_data": "🔄 未找到交叉数据。请正确填写 Excel 工作表。",
-        "download_chart": "📥 下载高清图表 (High-DPI)"
+        "download_hint": "💡 提示：要下载高分辨率 (High-DPI) 图表，请点击图表右上角的相机图标。"
     }
 }
 
@@ -377,7 +376,6 @@ def load_spec_data(token):
             return pd.DataFrame()
     return pd.DataFrame()
 
-
 # ==========================================
 # 3.1. FUNÇÃO CORRIGIDA DE SAVE DATA (PRESERVA ABAS EXISTENTES)
 # ==========================================
@@ -570,6 +568,7 @@ if not df.empty:
         df_f = df_f.copy()
         df_f['Price (BRL)'] = df_f['Price'].apply(lambda x: f"R$ {int(x):,}".replace(",", "."))
 
+        st.caption(t("download_hint"))
         fig = px.scatter(df_f, x=e_x, y=e_y, 
                          color='Type', 
                          text='Label', 
@@ -628,16 +627,6 @@ if not df.empty:
         fig.update_yaxes(autorange=True)
 
         st.plotly_chart(fig, use_container_width=True, config=plotly_export_config)
-        
-        # Botão dedicado de Exportação High-DPI para a Matriz
-        buf_matrix = BytesIO()
-        buf_matrix.write(pio.to_image(fig, format='png', scale=2, width=1200, height=800))
-        st.download_button(
-            label=t("download_chart"), 
-            data=buf_matrix.getvalue(), 
-            file_name="competitive_matrix_high_dpi.png", 
-            mime="image/png"
-        )
 
     # ==================== ABA 2: NEWS RADAR & CADASTRO ====================
     with tab2:
@@ -825,22 +814,13 @@ if not df.empty:
                 ratio = (tiv_y / tiv_total * 100) if tiv_total > 0 else 0
                 st.metric(t("installation_ratio"), f"{ratio:.1f}%")
                 
+            st.caption(t("download_hint"))
             fig_spec = px.scatter(df_spec_filtered, x='Price', y='TIV', color='Value', 
                                   color_discrete_map={'Y': '#2E7D32', 'N': '#D32F2F'},
                                   hover_data=['Dimensions_Key', 'Price', 'TIV'])
             
             fig_spec.update_layout(template="plotly_white", height=600)
             st.plotly_chart(fig_spec, use_container_width=True, config=plotly_export_config)
-            
-            # Botão dedicado de Exportação High-DPI para Spec Dispersion
-            buf_spec = BytesIO()
-            buf_spec.write(pio.to_image(fig_spec, format='png', scale=2, width=1200, height=800))
-            st.download_button(
-                label=t("download_chart"), 
-                data=buf_spec.getvalue(), 
-                file_name="spec_dispersion_high_dpi.png", 
-                mime="image/png"
-            )
             
         else:
             st.info(t("no_cross_data"))
