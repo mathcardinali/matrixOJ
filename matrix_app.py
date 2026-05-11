@@ -458,8 +458,11 @@ def fetch_automotive_news():
 
 @st.cache_data
 def load_survey_data():
-    df = pd.read_csv('Buyers Survey 20260511.csv')
-    return df
+    file_path = 'Buyers Survey 20260511.csv'
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path)
+        return df
+    return pd.DataFrame()
 
 def process_multiple_choice(df, keyword):
     cols = [c for c in df.columns if keyword in c and '[' in c]
@@ -837,6 +840,11 @@ def run_survey():
     st.markdown("A complete immersion in the journey, profile, satisfaction, and routine of buyers. / 全面沉浸在买家的旅程、个人资料、满意度和日常中。")
 
     df = load_survey_data()
+
+    # BLOQUEIO ANTI-ERRO: Se o dataframe estiver vazio (arquivo não existe), avisa e para a renderização do dashboard
+    if df.empty:
+        st.warning("⚠️ Survey data file not found. Please upload the CSV file using the sidebar. / 未找到调查数据文件。请使用侧边栏上传 CSV 文件。")
+        return
 
     # Filtros Globais da barra lateral
     st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/Streamlit_logo_primary_colormark_darktext.png/300px-Streamlit_logo_primary_colormark_darktext.png", width=150)
