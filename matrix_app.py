@@ -827,12 +827,16 @@ def run_survey():
     st.sidebar.header("Update Data / 更新数据")
     uploaded_file = st.sidebar.file_uploader("Upload new CSV / 上传新CSV", type=["csv"])
     if uploaded_file is not None:
-        with open('Buyers Survey 20260511.csv', 'wb') as f:
-            f.write(uploaded_file.getbuffer())
-        load_survey_data.clear()
-        st.sidebar.success("Data updated successfully! / 数据更新成功！")
-        time.sleep(1.5)
-        st.rerun()
+        # CORREÇÃO DO LOOP INFINITO
+        file_hash = f"{uploaded_file.name}_{uploaded_file.size}"
+        if st.session_state.get("last_uploaded_file") != file_hash:
+            with open('Buyers Survey 20260511.csv', 'wb') as f:
+                f.write(uploaded_file.getbuffer())
+            load_survey_data.clear()
+            st.session_state["last_uploaded_file"] = file_hash
+            st.sidebar.success("Data updated successfully! / 数据更新成功！")
+            time.sleep(1.5)
+            st.rerun()
         
     st.sidebar.markdown("---")
     
